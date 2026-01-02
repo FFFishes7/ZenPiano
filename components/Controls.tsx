@@ -105,7 +105,7 @@ const Controls: React.FC<ControlsProps> = React.memo(({
                 </div>
             </form>
         ) : (
-            <div className="flex items-center justify-between px-2 py-1">
+            <div className="flex items-center justify-between px-2 py-2">
                  <div className="flex-1 min-w-0 mr-4">
                     <h3 className="text-base sm:text-lg font-medium text-indigo-900 truncate">{songName || "Untitled"}</h3>
                     {songDescription && <p className="text-slate-500 italic text-xs truncate">"{songDescription}"</p>}

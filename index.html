@@ -6,20 +6,13 @@
     <title>Zen Piano AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      /* Custom scrollbar to maintain minimalism */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+      /* Hide scrollbar but keep scroll functionality */
+      .hide-scrollbar {
+        scrollbar-width: none; /* Firefox */
+        -ms-overflow-style: none; /* IE/Edge */
       }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
+      .hide-scrollbar::-webkit-scrollbar {
+        display: none; /* Chrome/Safari/Opera */
       }
     </style>
   <script type="importmap">
@@ -37,5 +30,6 @@
 </head>
   <body class="bg-slate-50 text-slate-900 antialiased overflow-hidden">
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
