@@ -1,0 +1,5 @@
+{
+  "name": "Zen Piano AI",
+  "description": "A full 88-key virtual piano with realistic synthesis. Play manually or let AI compose complete, complex musical pieces.",
+  "requestFramePermissions": []
+}
