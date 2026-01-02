@@ -4,6 +4,8 @@
 
 **An elegant AI-powered virtual piano application**
 
+🌐 **[Live Demo](https://fffishes7.github.io/ZenPiano/)**
+
 [![React](https://img.shields.io/badge/React-19.x-61DAFB?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite)](https://vitejs.dev/)
