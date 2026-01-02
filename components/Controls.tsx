@@ -41,7 +41,7 @@ const Controls: React.FC<ControlsProps> = React.memo(({
   };
 
   const isLoading = status === PianoStatus.FETCHING_AI;
-  const isPlaying = status === PianoStatus.PLAYING_AI;
+  const isPlaying = status === PianoStatus.PLAYING_SONG;
   const isPaused = status === PianoStatus.PAUSED;
   const isReady = status === PianoStatus.READY;
   const hasSong = isPlaying || isPaused || isReady;

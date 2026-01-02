@@ -2,6 +2,16 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SongResponse } from "../types";
 
+// Singleton pattern: reuse GoogleGenAI instance
+let aiInstance: GoogleGenAI | null = null;
+
+const getAIInstance = (): GoogleGenAI => {
+  if (!aiInstance) {
+    aiInstance = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  }
+  return aiInstance;
+};
+
 // Following @google/genai guidelines: Use Type instead of SchemaType and use object literal for schema
 const songSchema = {
   type: Type.OBJECT,
@@ -30,8 +40,8 @@ const songSchema = {
 };
 
 export const generateSong = async (topic: string): Promise<SongResponse> => {
-  // Always initialize GoogleGenAI with the apiKey from process.env.API_KEY inside the function
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Reuse GoogleGenAI instance
+  const ai = getAIInstance();
   
   // Use gemini-2.5-flash to bypass the environment's 'Launch' gate triggered by Gemini 3 models
   const model = "gemini-2.5-flash";

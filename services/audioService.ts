@@ -82,7 +82,10 @@ async function getCachedAudioBlob(fullUrl: string): Promise<Blob> {
 }
 
 class AudioService {
-  private samplers: Sampler[] = []; 
+  // Single sampler instance (can be extended to multi-velocity layered samplers for better quality)
+  // TODO: When implementing velocity layers, load multiple sample sets (e.g., pp, mf, ff)
+  //       and select the most appropriate sampler based on velocity value for more realistic piano tone
+  private sampler: Sampler | null = null;
   private objectUrls: string[] = [];
   private reverb: Reverb | null = null;
   private compressor: Compressor | null = null;
@@ -94,10 +97,10 @@ class AudioService {
   private _isAborting = false;
 
   private _disposeResources() {
-    this.samplers.forEach(s => {
-      try { s.dispose(); } catch (e) {}
-    });
-    this.samplers = [];
+    if (this.sampler) {
+      try { this.sampler.dispose(); } catch (e) {}
+      this.sampler = null;
+    }
 
     this.objectUrls.forEach(url => {
       try { URL.revokeObjectURL(url); } catch (e) {}
@@ -174,28 +177,52 @@ class AudioService {
     // Fix: Added timeout for Sampler loading to prevent indefinite hanging
     const SAMPLER_LOAD_TIMEOUT = 20000; // 20 seconds timeout for decoding/initialization
 
-    const samplerPromise = new Promise<Sampler>((resolve) => {
-        const s = new Sampler({
+    // Use a controlled pattern to properly clean up sampler if timeout occurs
+    let samplerInstance: Sampler | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let isResolved = false;
+
+    const sampler = await new Promise<Sampler>((resolve, reject) => {
+        timeoutId = setTimeout(() => {
+            if (!isResolved) {
+                isResolved = true;
+                // Clean up the sampler instance if it was created but loading timed out
+                if (samplerInstance) {
+                    try {
+                        samplerInstance.dispose();
+                    } catch (e) {
+                        // Ignore disposal errors
+                    }
+                }
+                reject(new Error("Audio decoding timed out"));
+            }
+        }, SAMPLER_LOAD_TIMEOUT);
+
+        samplerInstance = new Sampler({
             urls: urlMap,
             release: 1, // Default release
             curve: "exponential",
             volume: -2,
-            onload: () => resolve(s),
+            onload: () => {
+                if (!isResolved) {
+                    isResolved = true;
+                    if (timeoutId) clearTimeout(timeoutId);
+                    resolve(samplerInstance!);
+                }
+            },
             onerror: (e) => {
                 console.error("Sampler Error", e);
-                resolve(s); 
+                if (!isResolved) {
+                    isResolved = true;
+                    if (timeoutId) clearTimeout(timeoutId);
+                    resolve(samplerInstance!); // Still resolve to allow partial functionality
+                }
             }
         });
-        if (this.output) s.connect(this.output);
+        if (this.output) samplerInstance.connect(this.output);
     });
 
-    const timeoutPromise = new Promise<Sampler>((_, reject) => {
-        setTimeout(() => reject(new Error("Audio decoding timed out")), SAMPLER_LOAD_TIMEOUT);
-    });
-
-    const sampler = await Promise.race([samplerPromise, timeoutPromise]);
-
-    this.samplers = [sampler];
+    this.sampler = sampler;
     this.isLoaded = true;
     onProgress(100);
   }
@@ -204,40 +231,41 @@ class AudioService {
     if (getContext().state !== 'running') await start();
   }
 
-  private getSamplerForVelocity(velocity: number): Sampler | null {
-    if (this.samplers.length === 0) return null;
-    return this.samplers[0];
-  }
-
   public startTone(note: string, velocity: number = 0.7) {
-    if (!this.isLoaded) return;
-    this.ensureContext();
-    const sampler = this.getSamplerForVelocity(velocity);
-    if (!sampler) return;
-    // Optimization: avoid mutating global sampler.release which can cause clipping
-    sampler.triggerAttack(note, now(), velocity);
+    if (!this.isLoaded || !this.sampler) return;
+    // Async ensure context starts, but don't block note triggering
+    // If context is not running, start() will start ASAP after user interaction
+    const ctx = getContext();
+    if (ctx.state !== 'running') {
+      start().catch(() => {}); // Silently handle start failure
+    }
+    this.sampler.triggerAttack(note, now(), velocity);
   }
 
   public stopTone(note: string) {
-    if (this._isSustainPedalDown) return;
-    this.samplers.forEach(s => s.triggerRelease(note, now()));
+    if (this._isSustainPedalDown || !this.sampler) return;
+    this.sampler.triggerRelease(note, now());
   }
 
   public setPedal(isDown: boolean) {
     this._isSustainPedalDown = isDown;
-    if (!isDown) this.samplers.forEach(s => s.releaseAll());
+    if (!isDown && this.sampler) this.sampler.releaseAll();
   }
 
   public scheduleEvents(events: { note: string; time: number; duration: number; velocity: number }[], onNoteStart: (n: string) => void, onNoteStop: (n: string) => void, onEnd: () => void) {
     this.stopSequence();
+    if (!this.sampler) return;
+    
     getTransport().bpm.value = 120;
     let maxTime = 0;
+    const sampler = this.sampler;
+    
     events.forEach(event => {
         const startTime = event.time;
         const endTime = event.time + event.duration;
         if (endTime > maxTime) maxTime = endTime;
         getTransport().schedule((time) => {
-            this.getSamplerForVelocity(event.velocity)?.triggerAttackRelease(event.note, event.duration, time, event.velocity);
+            sampler.triggerAttackRelease(event.note, event.duration, time, event.velocity);
             getDraw().schedule(() => onNoteStart(event.note), time);
         }, startTime);
         getTransport().schedule((time) => {
@@ -249,8 +277,8 @@ class AudioService {
 
   public play() { if (getContext().state !== 'running') start(); getTransport().start(); }
   public pause() { getTransport().pause(); }
-  public stopPlayback() { getTransport().stop(); this.samplers.forEach(s => s.releaseAll()); }
-  public stopSequence() { getTransport().stop(); getTransport().cancel(); this.samplers.forEach(s => s.releaseAll()); }
+  public stopPlayback() { getTransport().stop(); if (this.sampler) this.sampler.releaseAll(); }
+  public stopSequence() { getTransport().stop(); getTransport().cancel(); if (this.sampler) this.sampler.releaseAll(); }
   public getCurrentTime(): number { return getTransport().seconds; }
 }
 

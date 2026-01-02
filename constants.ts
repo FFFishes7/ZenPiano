@@ -1,5 +1,12 @@
 import { NoteDefinition } from './types';
 
+// ==================== Application Configuration Constants ====================
+
+/** Maximum MIDI file size limit (10MB) */
+export const MAX_MIDI_FILE_SIZE = 10 * 1024 * 1024;
+
+// ==================== Piano Keyboard Configuration ====================
+
 const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 const generate88Keys = (): NoteDefinition[] => {

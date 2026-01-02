@@ -1,11 +1,31 @@
 
-import React, { useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { PIANO_KEYS } from '../constants';
 import { NoteDefinition, PianoStatus } from '../types';
 import PianoKey from './PianoKey';
 
+// Custom hook for responsive mobile detection with resize listener
+function useIsMobile(breakpoint: number = 640): boolean {
+  const [isMobile, setIsMobile] = useState(() => 
+    typeof window !== 'undefined' && window.innerWidth < breakpoint
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < breakpoint);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [breakpoint]);
+
+  return isMobile;
+}
+
 interface PianoProps {
-  activeNotes: string[];
+  activeNotes: Set<string>;
   onNoteStart: (note: string) => void;
   onNoteStop: (note: string) => void;
   status: PianoStatus;
@@ -28,14 +48,49 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastNoteRef = useRef<string | null>(null);
   
+  // Responsive mobile detection - computed once and updated on resize
+  const isMobile = useIsMobile(640);
+  
   // 1. Ref Map: Stores direct DOM references to keys
   const keysRef = useRef<Map<string, HTMLDivElement>>(new Map());
   
-  // 2. Rect Cache: Stores geometric data calculated on touchstart
+  // 2. Rect Cache: Stores geometric data calculated on demand
   const keyRectsRef = useRef<KeyRect[]>([]);
+  const keyRectsDirtyRef = useRef(true); // Flag indicating if cache needs update
   
   // 3. Gesture state: scroll permission determined at touchstart (immutable during gesture)
   const gestureScrollPermissionRef = useRef<GestureScrollPermission>(GestureScrollPermission.NONE);
+
+  // 4. Refs for callbacks and status to avoid re-bindng event listeners
+  const statusRef = useRef(status);
+  const onNoteStartRef = useRef(onNoteStart);
+  const onNoteStopRef = useRef(onNoteStop);
+  
+  // Keep refs in sync with props
+  useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { onNoteStartRef.current = onNoteStart; }, [onNoteStart]);
+  useEffect(() => { onNoteStopRef.current = onNoteStop; }, [onNoteStop]);
+  
+  // Function to invalidate cache
+  const invalidateKeyRects = useCallback(() => {
+    keyRectsDirtyRef.current = true;
+  }, []);
+  
+  // Listen to resize and scroll to invalidate cache
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    
+    const handleResize = () => invalidateKeyRects();
+    const handleScroll = () => invalidateKeyRects();
+    
+    window.addEventListener('resize', handleResize);
+    container?.addEventListener('scroll', handleScroll, { passive: true });
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      container?.removeEventListener('scroll', handleScroll);
+    };
+  }, [invalidateKeyRects]);
 
   // Optimization: Map key bindings for O(1) lookup in event handlers
   const keyBindingMap = useMemo(() => {
@@ -47,7 +102,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   }, []);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (status === PianoStatus.PLAYING_AI) return;
+    if (status === PianoStatus.PLAYING_SONG) return;
     if (event.repeat) return;
     const key = event.key.toLowerCase();
     const note = keyBindingMap.get(key);
@@ -57,7 +112,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   }, [onNoteStart, status, keyBindingMap]);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
-    if (status === PianoStatus.PLAYING_AI) return;
+    if (status === PianoStatus.PLAYING_SONG) return;
     const key = event.key.toLowerCase();
     const note = keyBindingMap.get(key);
     if (note) {
@@ -82,12 +137,12 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   }, []);
 
   const handlePlayStart = useCallback((noteData: NoteDefinition) => {
-      if (status === PianoStatus.PLAYING_AI) return;
+      if (status === PianoStatus.PLAYING_SONG) return;
       onNoteStart(noteData.note);
   }, [onNoteStart, status]);
   
   const handlePlayStop = useCallback((noteData: NoteDefinition) => {
-      if (status === PianoStatus.PLAYING_AI) return;
+      if (status === PianoStatus.PLAYING_SONG) return;
       onNoteStop(noteData.note);
   }, [onNoteStop, status]);
 
@@ -97,8 +152,10 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
     else keysRef.current.delete(note);
   }, []);
 
-  // Helper to cache key rects and check if point hits a key
+  // Helper to cache key rects - only recalculates if dirty
   const cacheKeyRects = useCallback(() => {
+    if (!keyRectsDirtyRef.current) return; // Cache is valid, skip calculation
+    
     const rects: KeyRect[] = [];
     keysRef.current.forEach((el, note) => {
       rects.push({
@@ -113,6 +170,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
       return a.isBlack ? -1 : 1;
     });
     keyRectsRef.current = rects;
+    keyRectsDirtyRef.current = false; // Mark cache as updated
   }, []);
 
   const findHitKey = useCallback((cx: number, cy: number): string | null => {
@@ -125,13 +183,12 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
 
   // Touch events on scrollContainer with conditional preventDefault
   // Key insight: gesture permission is determined ONLY at touchstart and never changes
+  // Using refs to avoid re-binding event listeners on every status/callback change
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
     const handleTouchStart = (e: TouchEvent) => {
-      if (status === PianoStatus.PLAYING_AI) return;
-      
       // Cache key rects FIRST (before any hit detection)
       cacheKeyRects();
       
@@ -142,76 +199,91 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
       // Determine permission based on whether touch hits a key
       const hitKey = findHitKey(cx, cy);
       
-      // DEBUG: Log touch start info
-      console.log('🎹 TOUCH START', {
-        x: cx,
-        y: cy,
-        hitKey,
-        target: (e.target as HTMLElement).tagName,
-        targetClass: (e.target as HTMLElement).className?.slice(0, 50),
-      });
+      // During song playback: allow scrolling but disable note triggering
+      if (statusRef.current === PianoStatus.PLAYING_SONG) {
+        gestureScrollPermissionRef.current = GestureScrollPermission.ALLOW;
+        return;
+      }
       
       if (hitKey) {
         // Touch started on a key → DENY scroll, enable piano glissando
         gestureScrollPermissionRef.current = GestureScrollPermission.DENY;
-        console.log('🔴 Permission: DENY (on key)');
-        onNoteStart(hitKey);
+        onNoteStartRef.current(hitKey);
         lastNoteRef.current = hitKey;
       } else {
         // Touch started outside keys (scrollbar/padding) → ALLOW scroll
         gestureScrollPermissionRef.current = GestureScrollPermission.ALLOW;
-        console.log('🟢 Permission: ALLOW (outside keys)');
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (status === PianoStatus.PLAYING_AI) return;
-      
       const permission = gestureScrollPermissionRef.current;
       const touch = e.touches[0];
       
-      // DEBUG: Log first few moves
-      console.log('👆 TOUCH MOVE', {
-        permission,
-        x: touch.clientX,
-        y: touch.clientY,
-        scrollLeft: container.scrollLeft,
-      });
-      
       // ALLOW: let browser handle scroll natively, do nothing
       if (permission === GestureScrollPermission.ALLOW) {
-        console.log('  → Letting browser scroll');
         return;
       }
+      
+      // Don't handle glissando during song playback
+      if (statusRef.current === PianoStatus.PLAYING_SONG) return;
       
       // DENY: prevent scroll and handle piano glissando
       if (permission === GestureScrollPermission.DENY) {
         e.preventDefault(); // This works because passive: false
-        console.log('  → preventDefault called');
         
         const cx = touch.clientX;
         const cy = touch.clientY;
         
+        // Boundary detection: check if touch point is within container bounds
+        const containerRect = container.getBoundingClientRect();
+        const isOutOfBounds = cx < containerRect.left || cx > containerRect.right ||
+                              cy < containerRect.top || cy > containerRect.bottom;
+        
+        // If touch moves outside container bounds, release current note and skip detection
+        if (isOutOfBounds) {
+          if (lastNoteRef.current) {
+            onNoteStopRef.current(lastNoteRef.current);
+            lastNoteRef.current = null;
+          }
+          return;
+        }
+        
         const note = findHitKey(cx, cy);
         
         if (note && note !== lastNoteRef.current) {
-          if (lastNoteRef.current) onNoteStop(lastNoteRef.current);
-          onNoteStart(note);
+          if (lastNoteRef.current) onNoteStopRef.current(lastNoteRef.current);
+          onNoteStartRef.current(note);
           lastNoteRef.current = note;
         } else if (!note && lastNoteRef.current) {
-          onNoteStop(lastNoteRef.current);
+          onNoteStopRef.current(lastNoteRef.current);
           lastNoteRef.current = null;
         }
       }
     };
 
     const handleTouchEnd = () => {
-      console.log('🏁 TOUCH END', { permission: gestureScrollPermissionRef.current });
       if (lastNoteRef.current) {
-        onNoteStop(lastNoteRef.current);
+        onNoteStopRef.current(lastNoteRef.current);
         lastNoteRef.current = null;
       }
       gestureScrollPermissionRef.current = GestureScrollPermission.NONE;
+    };
+
+    // Helper function to release all notes
+    const releaseAllNotes = () => {
+      if (lastNoteRef.current) {
+        onNoteStopRef.current(lastNoteRef.current);
+        lastNoteRef.current = null;
+      }
+      gestureScrollPermissionRef.current = GestureScrollPermission.NONE;
+    };
+
+    // Handle page visibility change - prevent stuck notes when switching tabs or interrupted by phone calls
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        releaseAllNotes();
+      }
     };
 
     // CRITICAL: touchmove must be { passive: false } to allow preventDefault
@@ -219,16 +291,19 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
     container.addEventListener('touchmove', handleTouchMove, { passive: false });
     container.addEventListener('touchend', handleTouchEnd, { passive: true });
     container.addEventListener('touchcancel', handleTouchEnd, { passive: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchEnd);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [status, onNoteStart, onNoteStop, cacheKeyRects, findHitKey]);
+  }, [cacheKeyRects, findHitKey]); // Only depend on stable function refs
 
   // Mouse drag-to-scroll for PC (same logic as touch)
+  // Using refs to avoid re-binding event listeners on every status change
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -238,14 +313,22 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
     let scrollStartLeft = 0;
 
     const handleMouseDown = (e: MouseEvent) => {
-      if (status === PianoStatus.PLAYING_AI) return;
-      
       // Cache key rects first
       cacheKeyRects();
       
       const hitKey = findHitKey(e.clientX, e.clientY);
       
-      console.log('🖱️ MOUSE DOWN', { hitKey, x: e.clientX, y: e.clientY });
+      // During song playback: allow scrolling but disable note triggering
+      if (statusRef.current === PianoStatus.PLAYING_SONG) {
+        // Allow scrolling even when clicking on keyboard area
+        gestureScrollPermissionRef.current = GestureScrollPermission.ALLOW;
+        isDragging = true;
+        startX = e.clientX;
+        scrollStartLeft = container.scrollLeft;
+        container.style.cursor = 'grabbing';
+        e.preventDefault();
+        return;
+      }
       
       if (hitKey) {
         // Click on key → let PianoKey handle it (mouse events on PianoKey still work)
@@ -267,13 +350,9 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
       
       const dx = e.clientX - startX;
       container.scrollLeft = scrollStartLeft - dx;
-      console.log('🖱️ MOUSE MOVE drag', { dx, scrollLeft: container.scrollLeft });
     };
 
     const handleMouseUp = () => {
-      if (isDragging) {
-        console.log('🖱️ MOUSE UP drag end');
-      }
       isDragging = false;
       container.style.cursor = 'grab';
       gestureScrollPermissionRef.current = GestureScrollPermission.NONE;
@@ -288,7 +367,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [status, cacheKeyRects, findHitKey]);
+  }, [cacheKeyRects, findHitKey]); // Only depend on stable function refs
 
   const whiteKeys = PIANO_KEYS.filter(k => k.type === 'white');
   const blackKeys = PIANO_KEYS.filter(k => k.type === 'black');
@@ -307,7 +386,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                         <PianoKey 
                             ref={(el) => registerKey(note.note, el)}
                             noteData={note}
-                            isActive={activeNotes.includes(note.note)}
+                            isActive={activeNotes.has(note.note)}
                             onPlayStart={handlePlayStart}
                             onPlayStop={handlePlayStop}
                         />
@@ -315,7 +394,6 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                 ))}
 
                 {blackKeys.map((note) => {
-                    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
                     const wkWidth = isMobile ? 2.5 : 3; 
                     const bkWidth = isMobile ? 1.5 : 2; 
                     
@@ -331,7 +409,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                             <PianoKey 
                                 ref={(el) => registerKey(note.note, el)}
                                 noteData={note}
-                                isActive={activeNotes.includes(note.note)}
+                                isActive={activeNotes.has(note.note)}
                                 onPlayStart={handlePlayStart}
                                 onPlayStop={handlePlayStop}
                             />

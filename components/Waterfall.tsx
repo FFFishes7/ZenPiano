@@ -2,17 +2,12 @@
 import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { PIANO_KEYS } from '../constants';
 import { audioService } from '../services/audioService';
-
-interface FlatEvent {
-    note: string;
-    time: number;
-    duration: number;
-    velocity: number;
-}
+import { FlatNoteEvent } from '../types';
 
 interface WaterfallProps {
-    events: FlatEvent[];
-    activeNotes: string[];
+    events: FlatNoteEvent[];
+    activeNotes: Set<string>;
+    isPlaying: boolean;
 }
 
 // Binary search to find the first event index that starts at or after the given time
@@ -31,8 +26,9 @@ const findStartIndex = (events: any[], time: number): number => {
     return low;
 };
 
-export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotes }) => {
+export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotes, isPlaying }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const gridCanvasRef = useRef<HTMLCanvasElement>(null); // Static grid layer
     const containerRef = useRef<HTMLDivElement>(null);
     const rafRef = useRef<number>(0);
     
@@ -46,7 +42,12 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
 
     // PERFORMANCE OPTIMIZATION: Use useRef instead of useState for scroll position
     // to avoid triggering React re-renders on every scroll frame.
-    const scrollLeftRef = useRef(TOTAL_WIDTH * 0.4); 
+    // Initial value -1 means uninitialized, will be calculated based on container width on first render
+    const scrollLeftRef = useRef(-1);
+    const lastScrollLeftRef = useRef(-1); // Used to detect scroll changes
+    
+    // Cached visible keys count - only updated on resize
+    const visibleKeysCountRef = useRef(0);
     
     const activeNotesRef = useRef(activeNotes);
     const isDraggingRef = useRef(false);
@@ -77,6 +78,11 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
         
         // Update ref directly without triggering re-render
         scrollLeftRef.current = Math.min(Math.max(0, scrollLeftRef.current + delta), maxScroll);
+        
+        // In paused state, manual rendering is required when scrolling
+        if (!isPlayingRef.current && renderRef.current) {
+            renderRef.current();
+        }
     }, [TOTAL_WIDTH]);
 
     const handleStart = useCallback((clientX: number) => {
@@ -94,33 +100,126 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
         // Update ref directly without triggering re-render
         const nextScroll = Math.min(Math.max(0, initialScrollRef.current - deltaX), maxScroll);
         scrollLeftRef.current = nextScroll;
+        
+        // In paused state, manual rendering is required when dragging
+        if (!isPlayingRef.current && renderRef.current) {
+            renderRef.current();
+        }
     }, [TOTAL_WIDTH]);
 
     const handleEnd = useCallback(() => {
         isDraggingRef.current = false;
     }, []);
 
+    // Store render function ref for animation control
+    const renderRef = useRef<(() => void) | null>(null);
+    const isPlayingRef = useRef(isPlaying);
+    
+    // Sync isPlaying to ref
+    useEffect(() => {
+        isPlayingRef.current = isPlaying;
+    }, [isPlaying]);
+
     useEffect(() => {
         const canvas = canvasRef.current;
+        const gridCanvas = gridCanvasRef.current;
         const container = containerRef.current;
-        if (!canvas || !container) return;
+        if (!canvas || !gridCanvas || !container) return;
 
-        const ctx = canvas.getContext('2d', { alpha: false });
-        if (!ctx) return;
+        const ctx = canvas.getContext('2d', { alpha: true }); // Dynamic layer needs transparency
+        const gridCtx = gridCanvas.getContext('2d', { alpha: false }); // Static layer doesn't need transparency
+        if (!ctx || !gridCtx) return;
+
+        // Draw static grid layer (defined early for use by updateDimensions)
+        const renderGrid = (width: number, height: number, scrollLeft: number) => {
+            gridCtx.fillStyle = '#f8fafc'; 
+            gridCtx.fillRect(0, 0, width, height);
+
+            const startKeyIndex = Math.floor(scrollLeft / COLUMN_WIDTH);
+            const visibleKeysCount = visibleKeysCountRef.current;
+            const hitLineY = height - KEYBOARD_HEIGHT;
+            
+            // Background Grid
+            for (let i = 0; i < visibleKeysCount; i++) {
+                const globalIndex = startKeyIndex + i;
+                if (globalIndex < 0 || globalIndex >= TOTAL_KEYS) continue;
+
+                const x = (globalIndex * COLUMN_WIDTH) - scrollLeft;
+                const noteDef = PIANO_KEYS[globalIndex];
+                
+                if (noteDef.type === 'black') {
+                    gridCtx.fillStyle = '#f1f5f9'; 
+                    gridCtx.fillRect(x, 0, COLUMN_WIDTH, hitLineY);
+                } else {
+                    gridCtx.strokeStyle = '#f1f5f9';
+                    gridCtx.beginPath();
+                    gridCtx.moveTo(x + COLUMN_WIDTH, 0);
+                    gridCtx.lineTo(x + COLUMN_WIDTH, hitLineY);
+                    gridCtx.stroke();
+                }
+            }
+
+            // Hit line glow
+            const lineGrad = gridCtx.createLinearGradient(0, hitLineY, 0, height);
+            lineGrad.addColorStop(0, 'rgba(0,0,0,0.1)');
+            lineGrad.addColorStop(0.1, 'rgba(0,0,0,0)');
+            gridCtx.fillStyle = lineGrad;
+            gridCtx.fillRect(0, hitLineY, width, 20);
+
+            gridCtx.fillStyle = '#334155';
+            gridCtx.fillRect(0, hitLineY, width, 1);
+            
+            lastScrollLeftRef.current = scrollLeft;
+        };
 
         const updateDimensions = () => {
-            if (!container || !canvas) return;
+            if (!container || !canvas || !gridCanvas) return;
             const dpr = window.devicePixelRatio || 1;
             const rect = container.getBoundingClientRect();
             
+            // Update dimensions for both canvases
             canvas.width = rect.width * dpr;
             canvas.height = rect.height * dpr;
+            gridCanvas.width = rect.width * dpr;
+            gridCanvas.height = rect.height * dpr;
             
             // Optimization: Reset transform before scaling to prevent cumulative errors
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.scale(dpr, dpr);
+            gridCtx.setTransform(1, 0, 0, 1, 0, 0);
+            gridCtx.scale(dpr, dpr);
+            
             canvas.style.width = `${rect.width}px`;
             canvas.style.height = `${rect.height}px`;
+            gridCanvas.style.width = `${rect.width}px`;
+            gridCanvas.style.height = `${rect.height}px`;
+            
+            // Cache visible keys count - only changes on resize
+            visibleKeysCountRef.current = Math.ceil(rect.width / COLUMN_WIDTH) + 1;
+            
+            // Calculate maximum scrollable range
+            const maxScroll = Math.max(0, TOTAL_WIDTH - rect.width);
+            
+            // On first load, initialize scroll position to center (near C4)
+            if (scrollLeftRef.current < 0) {
+                // C4 is at key index 39 (counting from A0), center it in view
+                const c4Index = 39;
+                const centerPosition = (c4Index * COLUMN_WIDTH) - (rect.width / 2) + (COLUMN_WIDTH / 2);
+                scrollLeftRef.current = Math.min(Math.max(0, centerPosition), maxScroll);
+            } else {
+                // On resize, ensure scroll position stays within bounds
+                scrollLeftRef.current = Math.min(scrollLeftRef.current, maxScroll);
+            }
+            
+            // Immediately render static grid layer synchronously to avoid black screen
+            const width = rect.width;
+            const height = rect.height;
+            renderGrid(width, height, scrollLeftRef.current);
+            
+            // Synchronously render dynamic layer (if render function is defined)
+            if (renderRef.current) {
+                renderRef.current();
+            }
         };
 
         const resizeObserver = new ResizeObserver(updateDimensions);
@@ -132,65 +231,58 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             const width = canvas.width / dpr;
             const height = canvas.height / dpr;
             
-            const currentScrollLeft = scrollLeftRef.current;
+            // Ensure scroll position is within valid range
+            const maxScroll = Math.max(0, TOTAL_WIDTH - width);
+            const currentScrollLeft = Math.min(Math.max(0, scrollLeftRef.current), maxScroll);
+            // Sync correct the ref value
+            if (scrollLeftRef.current !== currentScrollLeft) {
+                scrollLeftRef.current = currentScrollLeft;
+            }
+            
             const currentEvents = eventsRef.current;
             const currentActiveNotes = activeNotesRef.current;
             
             const currentTime = Math.max(0, audioService.getCurrentTime() - LATENCY_CORRECTION);
 
-            ctx.fillStyle = '#f8fafc'; 
-            ctx.fillRect(0, 0, width, height);
-
-            const startKeyIndex = Math.floor(currentScrollLeft / COLUMN_WIDTH);
-            const visibleKeysCount = Math.ceil(width / COLUMN_WIDTH) + 1;
-            
-            // Background Grid
-            for (let i = 0; i < visibleKeysCount; i++) {
-                const globalIndex = startKeyIndex + i;
-                if (globalIndex < 0 || globalIndex >= TOTAL_KEYS) continue;
-
-                const x = (globalIndex * COLUMN_WIDTH) - currentScrollLeft;
-                const noteDef = PIANO_KEYS[globalIndex];
-                
-                if (noteDef.type === 'black') {
-                    ctx.fillStyle = '#f1f5f9'; 
-                    ctx.fillRect(x, 0, COLUMN_WIDTH, height - KEYBOARD_HEIGHT);
-                } else {
-                    ctx.strokeStyle = '#f1f5f9';
-                    ctx.beginPath();
-                    ctx.moveTo(x + COLUMN_WIDTH, 0);
-                    ctx.lineTo(x + COLUMN_WIDTH, height - KEYBOARD_HEIGHT);
-                    ctx.stroke();
-                }
+            // Only redraw static grid layer when scroll position changes
+            if (currentScrollLeft !== lastScrollLeftRef.current) {
+                renderGrid(width, height, currentScrollLeft);
             }
 
+            // Clear dynamic layer
+            ctx.clearRect(0, 0, width, height);
+
+            const startKeyIndex = Math.floor(currentScrollLeft / COLUMN_WIDTH);
+            const visibleKeysCount = visibleKeysCountRef.current;
             const hitLineY = height - KEYBOARD_HEIGHT;
 
             // --- OPTIMIZED NOTE RENDERING ---
-            // 1. Calculate Time Window
-            
-            const viewDuration = hitLineY / PIXELS_PER_SECOND;
-            const maxVisibleTime = currentTime + viewDuration + 0.5; // +0.5s buffer for notes entering top
-            
-            // Look back time: Allow for notes that started before currentTime but are long enough to still be visible.
-            // 8 seconds is a generous buffer for very long sustain pedal usage.
-            const minVisibleStartTime = currentTime - 8.0; 
-
-            // 2. Binary Search to find start index
-            const startIndex = findStartIndex(currentEvents, minVisibleStartTime);
-
-            // 3. Iterate only through potentially visible notes
-            for (let i = startIndex; i < currentEvents.length; i++) {
-                const event = currentEvents[i];
-
-                // Stop processing if the note starts after the top of the screen
-                if (event.time > maxVisibleTime) break;
-
-                const keyIndex = (event as any).keyIndex;
-                const noteX = (keyIndex * COLUMN_WIDTH) - currentScrollLeft;
+            // Skip note rendering if no events
+            if (currentEvents.length > 0) {
+                // 1. Calculate Time Window
                 
-                // Horizontal Culling: Check if note is within horizontal view
-                if (noteX + COLUMN_WIDTH < 0 || noteX > width) continue;
+                const viewDuration = hitLineY / PIXELS_PER_SECOND;
+                const maxVisibleTime = currentTime + viewDuration + 0.5; // +0.5s buffer for notes entering top
+                
+                // Look back time: Allow for notes that started before currentTime but are long enough to still be visible.
+                // 8 seconds is a generous buffer for very long sustain pedal usage.
+                const minVisibleStartTime = currentTime - 8.0; 
+
+                // 2. Binary Search to find start index
+                const startIndex = findStartIndex(currentEvents, minVisibleStartTime);
+
+                // 3. Iterate only through potentially visible notes
+                for (let i = startIndex; i < currentEvents.length; i++) {
+                    const event = currentEvents[i];
+
+                    // Stop processing if the note starts after the top of the screen
+                    if (event.time > maxVisibleTime) break;
+
+                    const keyIndex = (event as any).keyIndex;
+                    const noteX = (keyIndex * COLUMN_WIDTH) - currentScrollLeft;
+                    
+                    // Horizontal Culling: Check if note is within horizontal view
+                    if (noteX + COLUMN_WIDTH < 0 || noteX > width) continue;
 
                 const timeUntilHit = event.time - currentTime;
                 const distanceToHit = timeUntilHit * PIXELS_PER_SECOND;
@@ -217,19 +309,10 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                     4
                 );
                 ctx.fill();
+                }
             }
 
-            // Hit line glow
-            const lineGrad = ctx.createLinearGradient(0, hitLineY, 0, height);
-            lineGrad.addColorStop(0, 'rgba(0,0,0,0.1)');
-            lineGrad.addColorStop(0.1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = lineGrad;
-            ctx.fillRect(0, hitLineY, width, 20);
-
-            ctx.fillStyle = '#334155';
-            ctx.fillRect(0, hitLineY, width, 1);
-
-            // Bottom Keyboard
+            // Bottom Keyboard (dynamic layer - needs to show activeNotes highlight)
             for (let i = 0; i < visibleKeysCount; i++) {
                 const globalIndex = startKeyIndex + i;
                 if (globalIndex < 0 || globalIndex >= TOTAL_KEYS) continue;
@@ -237,7 +320,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 const x = (globalIndex * COLUMN_WIDTH) - currentScrollLeft;
                 const noteDef = PIANO_KEYS[globalIndex];
                 const isBlack = noteDef.type === 'black';
-                const isActive = currentActiveNotes.includes(noteDef.note);
+                const isActive = currentActiveNotes.has(noteDef.note);
 
                 const keyY = hitLineY + 1;
                 const keyH = KEYBOARD_HEIGHT - 1;
@@ -259,17 +342,46 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                     ctx.fillText(noteDef.note, x + (COLUMN_WIDTH / 2), keyY + keyH - 10);
                 }
             }
-
-            rafRef.current = requestAnimationFrame(render);
+            // Note: don't call requestAnimationFrame inside render, controlled externally
         };
 
-        rafRef.current = requestAnimationFrame(render);
+        // Store render function for external animation control
+        renderRef.current = render;
+
+        // Render one frame immediately (ensure initial display)
+        render();
 
         return () => {
              resizeObserver.disconnect();
              cancelAnimationFrame(rafRef.current);
+             renderRef.current = null;
         };
-    }, [TOTAL_WIDTH]); 
+    }, [TOTAL_WIDTH]); // Remove isPlaying dependency to avoid reinitializing canvas
+    
+    // Separate effect to control animation start/stop, won't cause canvas reinitialization
+    useEffect(() => {
+        if (isPlaying && renderRef.current) {
+            // Start animation loop when playback begins
+            const animate = () => {
+                if (renderRef.current && isPlayingRef.current) {
+                    renderRef.current();
+                    rafRef.current = requestAnimationFrame(animate);
+                }
+            };
+            rafRef.current = requestAnimationFrame(animate);
+        } else {
+            // Stop animation on pause, but keep current frame
+            cancelAnimationFrame(rafRef.current);
+            // Render one frame on pause to ensure correct display
+            if (renderRef.current) {
+                renderRef.current();
+            }
+        }
+        
+        return () => {
+            cancelAnimationFrame(rafRef.current);
+        };
+    }, [isPlaying]); 
 
     return (
         <div 
@@ -280,13 +392,20 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             onMouseMove={(e) => handleMove(e.clientX)}
             onMouseUp={handleEnd}
             onMouseLeave={handleEnd}
-            onTouchStart={(e) => handleStart(e.touches[0].clientX)}
-            onTouchMove={(e) => handleMove(e.touches[0].clientX)}
+            onTouchStart={(e) => e.touches.length > 0 && handleStart(e.touches[0].clientX)}
+            onTouchMove={(e) => e.touches.length > 0 && handleMove(e.touches[0].clientX)}
             onTouchEnd={handleEnd}
         >
+            {/* Static grid layer - bottom layer */}
+            <canvas 
+                ref={gridCanvasRef} 
+                className="absolute inset-0 block pointer-events-none" 
+                style={{ width: '100%', height: '100%' }}
+            />
+            {/* Dynamic notes+keyboard layer - top layer */}
             <canvas 
                 ref={canvasRef} 
-                className="block pointer-events-none" 
+                className="absolute inset-0 block pointer-events-none" 
                 style={{ width: '100%', height: '100%' }}
             />
         </div>

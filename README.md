@@ -1,20 +1,95 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+
+# 🎹 ZenPiano
+
+**An elegant AI-powered virtual piano application**
+
+[![React](https://img.shields.io/badge/React-19.x-61DAFB?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?logo=vite)](https://vitejs.dev/)
+[![Tone.js](https://img.shields.io/badge/Tone.js-14.x-F734D3)](https://tonejs.github.io/)
+
 </div>
 
-# Run and deploy your AI Studio app
+## ✨ Features
 
-This contains everything you need to run your app locally.
+- 🎵 **AI Composition** - Generate piano pieces automatically from text descriptions using Google Gemini AI
+- 🎹 **Virtual Piano** - Full-size piano keyboard with mouse click and keyboard input support
+- 📁 **MIDI Import** - Drag and drop or upload MIDI files for playback
+- 🌊 **Waterfall View** - Visualize notes falling animation, similar to rhythm games
+- 🎚️ **Playback Controls** - Complete controls for play, pause, and stop
+- 📱 **Responsive Design** - Works on desktop and mobile devices
 
-View your app in AI Studio: https://ai.studio/apps/drive/1cMy-TCWbX7vClVsIMwejLAbgozAC7CEq
+## 🚀 Quick Start
 
-## Run Locally
+### Requirements
 
-**Prerequisites:**  Node.js
+- Node.js 18+
+- npm or yarn
 
+### Installation
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/FFFishes7/ZenPiano.git
+   cd ZenPiano
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure API Key**
+   
+   Set your Gemini API Key in the `.env.local` file:
+   ```
+   GEMINI_API_KEY=your_api_key_here
+   ```
+
+4. **Start the development server**
+   ```bash
+   npm run dev
+   ```
+
+5. **Open your browser at** `http://localhost:5173`
+
+## 🎮 Usage
+
+### Keyboard Playing
+Play the piano directly using your computer keyboard, with key mappings covering the central octave range.
+
+### AI Composition
+Describe the music style you want in the input box, for example:
+- "A gentle lullaby"
+- "An upbeat jazz melody"
+- "A melancholic classical piano piece"
+
+### MIDI Playback
+Drag and drop `.mid` or `.midi` files onto the application window to automatically load and play.
+
+## 🛠️ Tech Stack
+
+| Technology | Purpose |
+|------------|---------|
+| React 19 | UI Framework |
+| TypeScript | Type Safety |
+| Vite | Build Tool |
+| Tone.js | Audio Synthesis Engine |
+| @tonejs/midi | MIDI File Parsing |
+| @google/genai | Gemini AI API |
+| Tailwind CSS | Styling Framework |
+
+## 📄 License
+
+MIT License
+
+---
+
+<div align="center">
+
+Made with ❤️ and 🎵
+
+Built with [Google AI Studio](https://aistudio.google.com/) & [Claude](https://claude.ai/)
+
+</div>
