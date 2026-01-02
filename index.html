@@ -15,6 +15,24 @@
       .hide-scrollbar::-webkit-scrollbar {
         display: none; /* Chrome/Safari/Opera */
       }
+      /* Mobile-first dynamic viewport height support */
+      .h-screen-safe {
+        height: 100vh;
+        height: 100dvh;
+      }
+      .min-h-screen-safe {
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+      .fixed-safe {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 100vh;
+        height: 100dvh;
+      }
     </style>
   <script type="importmap">
 {

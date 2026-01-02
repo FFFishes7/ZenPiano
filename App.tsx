@@ -119,7 +119,7 @@ const App: React.FC = () => {
   if (!audioQuality) {
     return (
       <div
-        className={`fixed inset-0 bg-slate-50 flex flex-col items-center justify-center z-50 p-4 ${
+        className={`fixed-safe bg-slate-50 flex flex-col items-center justify-center z-50 p-4 ${
           isMounting ? 'pointer-events-none' : ''
         }`}
       >
@@ -141,7 +141,7 @@ const App: React.FC = () => {
   // ==================== Render: Loading Page ====================
   if (!isSamplesLoaded) {
     return (
-      <div className="fixed inset-0 bg-white flex flex-col items-center justify-center z-50">
+      <div className="fixed-safe bg-white flex flex-col items-center justify-center z-50">
         <div className="w-64 space-y-6">
           <h1 className="text-2xl font-light text-center tracking-widest text-slate-800 uppercase">
             Tuning
@@ -169,7 +169,7 @@ const App: React.FC = () => {
   // ==================== Render: Main Application Interface ====================
   return (
     <div
-      className="h-screen w-full bg-slate-50 flex flex-col overflow-hidden relative"
+      className="h-screen-safe w-full bg-slate-50 flex flex-col overflow-hidden relative"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}
