@@ -12,7 +12,6 @@ import { MAX_MIDI_FILE_SIZE } from '../constants';
 
 interface UseSongPlayerOptions {
   activeNotesRef: React.MutableRefObject<Map<string, number>>;
-  setActiveNotes: React.Dispatch<React.SetStateAction<Map<string, number>>>;
   clearAllNotes: () => void;
 }
 
@@ -20,7 +19,6 @@ interface UseSongPlayerReturn {
   status: PianoStatus;
   currentSong: SongResponse | null;
   flatEvents: FlatNoteEvent[];
-  playbackProgress: number;
   totalDuration: number;
   handleGenerateAndPlay: (prompt: string) => Promise<void>;
   handleMidiUpload: (file: File) => Promise<void>;
@@ -65,13 +63,11 @@ const getFlatEvents = (song: SongResponse | null): FlatNoteEvent[] => {
  */
 export const useSongPlayer = ({
   activeNotesRef,
-  setActiveNotes,
   clearAllNotes,
 }: UseSongPlayerOptions): UseSongPlayerReturn => {
   const [status, setStatus] = useState<PianoStatus>(PianoStatus.IDLE);
   const [currentSong, setCurrentSong] = useState<SongResponse | null>(null);
   const [flatEvents, setFlatEvents] = useState<FlatNoteEvent[]>([]);
-  const [playbackProgress, setPlaybackProgress] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
 
   const rafRef = useRef<number>(0);
@@ -91,27 +87,9 @@ export const useSongPlayer = ({
 
     return () => {
       audioService.stopSequence();
-      cancelAnimationFrame(rafRef.current);
       audioService.setPassivePauseHandler(() => {}); // Clear on unmount
     };
   }, []);
-
-  // Progress tracking animation loop - only runs when playing or paused
-  useEffect(() => {
-    // Only start RAF when actively playing or paused with valid duration
-    if ((status !== PianoStatus.PLAYING_SONG && status !== PianoStatus.PAUSED) || totalDuration <= 0) {
-      return;
-    }
-
-    const updateProgress = () => {
-      const current = audioService.getCurrentTime();
-      const pct = (current / totalDuration) * 100;
-      setPlaybackProgress(Math.min(pct, 100));
-      rafRef.current = requestAnimationFrame(updateProgress);
-    };
-    rafRef.current = requestAnimationFrame(updateProgress);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [status, totalDuration]);
 
   /**
    * Schedule note events for playback (Cache Phase)
@@ -139,14 +117,6 @@ export const useSongPlayer = ({
             // FAST PATH: Direct ref update
             const currentCount = activeNotesRef.current.get(n) || 0;
             activeNotesRef.current.set(n, currentCount + 1);
-
-            // SLOW PATH: React state sync
-            setActiveNotes(prev => {
-              const next = new Map<string, number>(prev);
-              const c = next.get(n) || 0;
-              next.set(n, c + 1);
-              return next;
-            });
           }
         },
         onNoteStop: (note: string) => {
@@ -160,24 +130,16 @@ export const useSongPlayer = ({
             } else {
                 activeNotesRef.current.set(n, currentCount - 1);
             }
-
-            // SLOW PATH: React state sync
-            setActiveNotes(prev => {
-              const next = new Map<string, number>(prev);
-              const c = next.get(n) || 0;
-              if (c <= 1) {
-                next.delete(n);
-              } else {
-                next.set(n, c - 1);
-              }
-              return next;
-            });
           }
         },
         onEnd: () => {
           if (newId !== generationIdRef.current) return;
           audioService.resetPlayback();
           setStatus(PianoStatus.READY);
+          clearAllNotes();
+        },
+        onClear: () => {
+          if (newId !== generationIdRef.current) return;
           clearAllNotes();
         }
       };
@@ -187,7 +149,7 @@ export const useSongPlayer = ({
     // If undefined (Resume), it uses the active session callbacks.
     audioService.play(callbacks);
     setStatus(PianoStatus.PLAYING_SONG);
-  }, [status, setActiveNotes, clearAllNotes, activeNotesRef]);
+  }, [status, clearAllNotes, activeNotesRef]);
 
   /**
    * Process and play MIDI data
@@ -322,7 +284,6 @@ export const useSongPlayer = ({
     audioService.resetPlayback(); // Completely stop, clear, and DESTROY instances
     setStatus(PianoStatus.IDLE);
     clearAllNotes();
-    setPlaybackProgress(0);
     setCurrentSong(null);
     setFlatEvents([]); // Clear the note events so Waterfall view becomes empty
     // Incrementing session ID here invalidates any pending async callbacks from the previous session.
@@ -333,7 +294,6 @@ export const useSongPlayer = ({
     status,
     currentSong,
     flatEvents,
-    playbackProgress,
     totalDuration,
     handleGenerateAndPlay,
     handleMidiUpload,

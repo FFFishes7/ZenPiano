@@ -10,7 +10,6 @@ import { PianoStatus } from '../types';
 interface UseNotePlayerOptions {
   status: PianoStatus;
   activeNotesRef: React.MutableRefObject<Map<string, number>>;
-  setActiveNotes: React.Dispatch<React.SetStateAction<Map<string, number>>>;
 }
 
 interface UseNotePlayerReturn {
@@ -26,7 +25,6 @@ interface UseNotePlayerReturn {
 export const useNotePlayer = ({
   status,
   activeNotesRef,
-  setActiveNotes,
 }: UseNotePlayerOptions): UseNotePlayerReturn => {
   // Source of Truth for logic (Synchronous)
   const internalActiveNotesRef = useRef<Map<string, number>>(new Map());
@@ -58,10 +56,7 @@ export const useNotePlayer = ({
     // Update Fast Path Ref Immediately for Visuals
     const fastCount = activeNotesRef.current.get(normalized) || 0;
     activeNotesRef.current.set(normalized, fastCount + 1);
-    
-    // Trigger UI update (Asynchronous)
-    setActiveNotes(new Map(notesMap));
-  }, [status, setActiveNotes, activeNotesRef]);
+  }, [status, activeNotesRef]);
 
   const handleNoteStop = useCallback((note: string) => {
     // Forbid user manual operation during song playback
@@ -88,10 +83,7 @@ export const useNotePlayer = ({
     } else {
         activeNotesRef.current.set(normalized, fastCount - 1);
     }
-
-    // Trigger UI update (Asynchronous)
-    setActiveNotes(new Map(notesMap));
-  }, [status, setActiveNotes, activeNotesRef]);
+  }, [status, activeNotesRef]);
 
   return {
     handleNoteStart,

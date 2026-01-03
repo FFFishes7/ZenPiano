@@ -100,6 +100,7 @@ class AudioService {
     onNoteStart: (n: string) => void;
     onNoteStop: (n: string) => void;
     onEnd: () => void;
+    onClear: () => void;
   } | null = null;
   
   public isLoaded = false;
@@ -313,26 +314,32 @@ class AudioService {
    * Internal helper to perform the actual reconstruction and scheduling.
    * Called only when Play is triggered from a non-paused state.
    */
-  private rebuildAndSchedule() {
+  private async rebuildAndSchedule() {
     if (!this.activeCallbacks) return;
 
     // 1. Ensure absolute clean slate
     this.disposeSampler();
     getTransport().cancel();
     
-    // 2. Fresh Instance Layer
+    // 2. Wait for AudioContext clock stability (Crucial for Safari)
+    // After a resume/resync, Safari's currentTime can jump or jitter. 
+    // A slightly longer delay ensures we read a stable 'seconds' value.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // 3. Fresh Instance Layer
     const sampler = this.createSampler();
     
-    // 3. Schedule all notes on the Transport timeline
-    const { onNoteStart, onNoteStop, onEnd } = this.activeCallbacks;
+    // 4. Sync State: Clear existing visual states to prepare for re-sync
+    const { onNoteStart, onNoteStop, onEnd, onClear } = this.activeCallbacks;
+    onClear();
+    
+    // 5. Schedule all notes on the Transport timeline
     getTransport().bpm.value = 120;
     let maxTime = 0;
     
-    // Get current time to avoid re-triggering past "Start" events during a rebuild/resume
     const currentTransportTime = getTransport().seconds;
-    
-    // Epsilon to prevent double-counting notes that started exactly at the pause time (10ms)
     const EPSILON = 0.01;
+    const RESYNC_THRESHOLD = 0.1; 
     const isAtStart = currentTransportTime < EPSILON;
 
     this.cachedEvents.forEach(event => {
@@ -340,23 +347,25 @@ class AudioService {
         const endTime = event.time + event.duration;
         if (endTime > maxTime) maxTime = endTime;
         
-        // Audio: Always schedule. Tone.js handles "past" triggers by playing from offset or skipping.
+        // Audio: Always schedule
         getTransport().schedule((time) => {
             sampler.triggerAttackRelease(event.note, event.duration, time, event.velocity);
         }, startTime);
 
-        // Visuals: Only schedule if they occur in the FUTURE relative to current playback time.
-        // Special Case: if we are at the very start (0s), we MUST include notes starting at 0s.
-        if (startTime > currentTransportTime + (isAtStart ? -EPSILON : EPSILON)) {
+        // Visual Re-sync & Future Scheduling
+        if (startTime < currentTransportTime - EPSILON && endTime > currentTransportTime + RESYNC_THRESHOLD) {
+            // CASE A: Note started in the PAST and is not ending immediately (Resync)
+            // CRITICAL for Safari: Call onNoteStart SYNC-LY here to ensure it happens
+            // before any scheduled stop events.
+            onNoteStart(event.note);
+            getTransport().schedule((time) => {
+                getDraw().schedule(() => onNoteStop(event.note), time);
+            }, endTime);
+        } else if (endTime > currentTransportTime + EPSILON) {
+            // CASE B: Note starts NOW or in the FUTURE
             getTransport().schedule((time) => {
                 getDraw().schedule(() => onNoteStart(event.note), time);
             }, startTime);
-        }
-        
-        // Similarly, only schedule Stop events for the future.
-        // CRITICAL: We do NOT use EPSILON here. If a note is ending any time after the current position,
-        // we MUST schedule its stop callback to prevent it from getting stuck in the 'active' state.
-        if (endTime > currentTransportTime) {
             getTransport().schedule((time) => {
                 getDraw().schedule(() => onNoteStop(event.note), time);
             }, endTime);
@@ -370,6 +379,7 @@ class AudioService {
       onNoteStart: (n: string) => void;
       onNoteStop: (n: string) => void;
       onEnd: () => void;
+      onClear: () => void;
   }) { 
     await this.ensureContext();
     

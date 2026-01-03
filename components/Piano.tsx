@@ -84,11 +84,11 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotesRef, onNoteStart, o
       const prevNotes = prevActiveNotesRef.current;
       const keys = keysRef.current;
 
-      // Check if visualization needs update
-      // Simple optimization: only update if the Set/Map content effectively changed
-      // But since we need to update potentially 88 keys, and checking diff is O(N),
-      // we can just iterate the keys that CHANGED.
-      // Actually, standard approach: Iterate all keys? No, iterate active notes + prev active notes.
+      // PERFORMANCE OPTIMIZATION: Skip all logic if no notes are active and nothing changed
+      if (currentNotes.size === 0 && prevNotes.size === 0) {
+        animationFrameId = requestAnimationFrame(renderLoop);
+        return;
+      }
       
       const allInvolvedNotes = new Set([...currentNotes.keys(), ...prevNotes.keys()]);
       

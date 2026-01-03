@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import Piano from './components/Piano';
 import Controls from './components/Controls';
 import { Waterfall } from './components/Waterfall';
+import { PlaybackProgressBar } from './components/PlaybackProgressBar';
 import { audioService } from './services/audioService';
 import { useNotePlayer } from './hooks/useNotePlayer';
 import { useSongPlayer } from './hooks/useSongPlayer';
@@ -22,14 +23,9 @@ const App: React.FC = () => {
   // ==================== Shared Note State ====================
   // FAST PATH: Ref for immediate visual updates (bypassing React render cycle)
   const activeNotesRef = useRef<Map<string, number>>(new Map());
-  
-  // SLOW PATH: React state for compatibility and less critical UI updates
-  // Note: Using Map for reference counting to support multiple overlapping instances of the same note
-  const [activeNotes, setActiveNotes] = useState<Map<string, number>>(new Map());
 
   const clearAllNotes = useCallback(() => {
     activeNotesRef.current.clear(); // Clear fast path immediately
-    setActiveNotes(new Map());
   }, []);
 
   // ==================== Use Hooks ====================
@@ -38,15 +34,14 @@ const App: React.FC = () => {
     status,
     currentSong,
     flatEvents,
-    playbackProgress,
     handleGenerateAndPlay: rawHandleGenerateAndPlay,
     handleMidiUpload: rawHandleMidiUpload,
     handlePlay,
     handlePause,
     handleStop: songPlayerStop,
+    totalDuration,
   } = useSongPlayer({
     activeNotesRef, // Pass fast path ref
-    setActiveNotes,
     clearAllNotes,
   });
 
@@ -72,7 +67,6 @@ const App: React.FC = () => {
   const { handleNoteStart, handleNoteStop } = useNotePlayer({
     status,
     activeNotesRef, // Pass fast path ref
-    setActiveNotes,
   });
 
   // ==================== Audio Loading Logic ====================
@@ -285,12 +279,10 @@ const App: React.FC = () => {
         </div>
 
         {/* Progress Bar */}
-        <div className="flex-none w-full h-1 bg-slate-200 relative z-50 mb-2 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.4)] transition-all duration-100 linear"
-            style={{ width: `${playbackProgress}%` }}
-          />
-        </div>
+        <PlaybackProgressBar 
+          status={status}
+          totalDuration={totalDuration}
+        />
 
         {/* Control Panel */}
         <div className="flex-none w-full z-10 bg-slate-50 shrink-0">
