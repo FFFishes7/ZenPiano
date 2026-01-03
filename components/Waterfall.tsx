@@ -6,7 +6,7 @@ import { FlatNoteEvent } from '../types';
 
 interface WaterfallProps {
     events: FlatNoteEvent[];
-    activeNotes: Map<string, number>;
+    activeNotesRef: React.MutableRefObject<Map<string, number>>; // Fast path ref
     isPlaying: boolean;
     maxDuration: number;
 }
@@ -27,7 +27,7 @@ const findStartIndex = (events: any[], time: number): number => {
     return low;
 };
 
-export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotes, isPlaying, maxDuration }) => {
+export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotesRef, isPlaying, maxDuration }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const gridCanvasRef = useRef<HTMLCanvasElement>(null); // Static grid layer
     const containerRef = useRef<HTMLDivElement>(null);
@@ -48,7 +48,10 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
     // Cached visible keys count - only updated on resize
     const visibleKeysCountRef = useRef(0);
     
-    const activeNotesRef = useRef(activeNotes);
+    // Track maxDuration in a ref to avoid stale closures in the render loop
+    const maxDurationRef = useRef(maxDuration);
+    useEffect(() => { maxDurationRef.current = maxDuration; }, [maxDuration]);
+    
     const isDraggingRef = useRef(false);
     const startXRef = useRef(0);
     const initialScrollRef = useRef(0);
@@ -74,7 +77,6 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             renderRef.current();
         }
     }, [mappedEvents]);
-    useEffect(() => { activeNotesRef.current = activeNotes; }, [activeNotes]);
 
     const handleWheel = useCallback((e: React.WheelEvent) => {
         const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
@@ -246,7 +248,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             }
             
             const currentEvents = eventsRef.current;
-            const currentActiveNotes = activeNotesRef.current;
+            const currentActiveNotes = activeNotesRef.current; // DIRECT READ from prop ref
             
             const currentTime = Math.max(0, audioService.getCurrentTime());
 
@@ -271,7 +273,8 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 const maxVisibleTime = currentTime + viewDuration + 0.5; // +0.5s buffer for notes entering top
                 
                 // Use calculated maxDuration for look-back to ensure long notes are not culled incorrectly.
-                const minVisibleStartTime = currentTime - (maxDuration + 2.0); 
+                // Must use ref to avoid stale closure (maxDuration is 0 on initial render creation)
+                const minVisibleStartTime = currentTime - (maxDurationRef.current + 2.0); 
 
                 // 2. Binary Search to find start index
                 const startIndex = findStartIndex(currentEvents, minVisibleStartTime);
