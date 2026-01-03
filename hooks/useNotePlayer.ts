@@ -2,7 +2,7 @@
  * Note player hook
  * Handles note state management when user plays piano manually
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { audioService } from '../services/audioService';
 import { normalizeNote } from '../utils/noteUtils';
 import { PianoStatus } from '../types';
@@ -28,6 +28,18 @@ export const useNotePlayer = ({
   activeNotes,
   setActiveNotes,
 }: UseNotePlayerOptions): UseNotePlayerReturn => {
+  // Use a local Ref as the Source of Truth for logic to ensure synchronous updates.
+  // We initialize it with the passed prop to ensure consistency on mount.
+  // Note: We don't sync it back from props in useEffect because this hook 
+  // "owns" the mutation logic. The prop is just for initial state or external resets.
+  const internalActiveNotesRef = useRef<Map<string, number>>(activeNotes);
+
+  // Sync ref if external activeNotes changes significantly (e.g. clearAllNotes)
+  // This covers cases where parent clears notes (Stop button)
+  if (activeNotes.size === 0 && internalActiveNotesRef.current.size !== 0) {
+      internalActiveNotesRef.current = new Map();
+  }
+
   const handleNoteStart = useCallback((note: string) => {
     // Forbid user manual play during song playback
     if (status === PianoStatus.PLAYING_SONG) return;
@@ -35,18 +47,20 @@ export const useNotePlayer = ({
     const normalized = normalizeNote(note);
     if (!normalized) return;
     
-    setActiveNotes(prev => {
-      const next = new Map(prev);
-      const currentCount = next.get(normalized) || 0;
-      next.set(normalized, currentCount + 1);
-      return next;
-    });
-    
-    // Only start tone if it wasn't already playing (count was 0)
-    if ((activeNotes.get(normalized) || 0) === 0) {
+    const notesMap = internalActiveNotesRef.current;
+    const currentCount = notesMap.get(normalized) || 0;
+
+    // Logic: If count is 0, start the tone.
+    if (currentCount === 0) {
       audioService.startTone(normalized);
     }
-  }, [status, setActiveNotes, activeNotes]);
+    
+    // Update Source of Truth SYNCHRONOUSLY
+    notesMap.set(normalized, currentCount + 1);
+    
+    // Trigger UI update (Asynchronous)
+    setActiveNotes(new Map(notesMap));
+  }, [status, setActiveNotes]);
 
   const handleNoteStop = useCallback((note: string) => {
     // Forbid user manual operation during song playback
@@ -55,22 +69,20 @@ export const useNotePlayer = ({
     const normalized = normalizeNote(note);
     if (!normalized) return;
     
-    setActiveNotes(prev => {
-      const next = new Map(prev);
-      const currentCount = next.get(normalized) || 0;
-      if (currentCount <= 1) {
-        next.delete(normalized);
-      } else {
-        next.set(normalized, currentCount - 1);
-      }
-      return next;
-    });
+    const notesMap = internalActiveNotesRef.current;
+    const currentCount = notesMap.get(normalized) || 0;
     
-    // Only stop tone if this was the last instance (count becomes 0)
-    if ((activeNotes.get(normalized) || 0) <= 1) {
-      audioService.stopTone(normalized);
+    // Logic: If count becomes 0 (or less), stop the tone.
+    if (currentCount <= 1) {
+       audioService.stopTone(normalized);
+       notesMap.delete(normalized);
+    } else {
+       notesMap.set(normalized, currentCount - 1);
     }
-  }, [status, setActiveNotes, activeNotes]);
+
+    // Trigger UI update (Asynchronous)
+    setActiveNotes(new Map(notesMap));
+  }, [status, setActiveNotes]);
 
   return {
     handleNoteStart,

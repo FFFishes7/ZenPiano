@@ -9,7 +9,8 @@ import {
   getDraw, 
   now, 
   start, 
-  getContext 
+  getContext,
+  ToneAudioBuffer
 } from 'tone';
 import { AudioQuality } from '../types';
 
@@ -82,11 +83,13 @@ async function getCachedAudioBlob(fullUrl: string): Promise<Blob> {
 }
 
 class AudioService {
-  // Single sampler instance (can be extended to multi-velocity layered samplers for better quality)
-  // TODO: When implementing velocity layers, load multiple sample sets (e.g., pp, mf, ff)
-  //       and select the most appropriate sampler based on velocity value for more realistic piano tone
+  // RESOURCE LAYER: Decoded AudioBuffers (Global Cache, never destroyed)
+  private buffers: Map<string, ToneAudioBuffer> = new Map();
+
+  // CONTEXT LAYER: Managed by Tone.js / Browser
+
+  // INSTANCE LAYER: Disposable components
   private sampler: Sampler | null = null;
-  private objectUrls: string[] = [];
   private reverb: Reverb | null = null;
   private compressor: Compressor | null = null;
   private output: Gain | null = null;
@@ -96,35 +99,85 @@ class AudioService {
   private currentQuality: AudioQuality = 'LIGHT';
   private _isAborting = false;
 
+  // Cleanup all disposable resources (Instance Layer)
   private _disposeResources() {
-    if (this.sampler) {
-      try { this.sampler.dispose(); } catch (e) {}
-      this.sampler = null;
-    }
-
-    this.objectUrls.forEach(url => {
-      try { URL.revokeObjectURL(url); } catch (e) {}
-    });
-    this.objectUrls = [];
+    this.disposeSampler();
 
     if (this.reverb) { this.reverb.dispose(); this.reverb = null; }
     if (this.compressor) { this.compressor.dispose(); this.compressor = null; }
     if (this.output) { this.output.dispose(); this.output = null; }
   }
+  
+  // Public method to explicitly destroy the sampler instance (Stop logic)
+  public disposeSampler() {
+    if (this.sampler) {
+      try { 
+          this.sampler.releaseAll();
+          this.sampler.disconnect();
+          this.sampler.dispose(); 
+      } catch (e) {
+          console.warn("Error disposing sampler:", e);
+      }
+      this.sampler = null;
+    }
+  }
+
+  // Create a new Sampler instance from cached buffers
+  private createSampler(): Sampler {
+    if (this.sampler) return this.sampler; // Return existing if valid
+    
+    // Map buffers to a format Tone.Sampler accepts (note -> buffer)
+    const bufferMap: Record<string, ToneAudioBuffer> = {};
+    this.buffers.forEach((buffer, note) => {
+        bufferMap[note] = buffer;
+    });
+
+    const sampler = new Sampler({
+        urls: bufferMap, // Pass buffers directly!
+        release: 1, 
+        curve: "exponential",
+        volume: -2,
+    });
+    
+    if (this.output) {
+        sampler.connect(this.output);
+    }
+    
+    this.sampler = sampler;
+    return sampler;
+  }
 
   public cancelLoading() {
     this._isAborting = true;
     this._disposeResources();
+    // Also clear buffers if loading is cancelled midway to ensure clean state?
+    // Actually, keeping buffers is fine, but let's just clear for safety if it was partial.
+    this.buffers.forEach(b => b.dispose());
+    this.buffers.clear();
   }
 
   public async loadSamples(onProgress: (val: number) => void, quality: AudioQuality): Promise<void> {
     await this.ensureContext();
     this._disposeResources();
+    // Do NOT clear this.buffers here if we want to support re-loading (switching quality)
+    // But since we only have one quality now, let's clear to be safe or check diff.
+    // For now, assume reload = fresh start.
+    this.buffers.forEach(b => b.dispose());
+    this.buffers.clear();
 
     this.currentQuality = 'LIGHT';
     this._isAborting = false;
     this.isLoaded = false;
 
+    // Setup Effect Chain (Instance Layer - but long lived for the app session usually)
+    // Actually, per rules, effects are part of context/graph. 
+    // Let's keep them alive or recreate? 
+    // The prompt says "Sampler / Synth / Voices" are disposable. 
+    // Effects are usually expensive to recreate. Let's recreate them to be safe on "Import", 
+    // or keep them. The rule says "Destroy all Sampler/Synth/Player".
+    // It implies the "source" nodes. Effect chain can persist or be rebuilt.
+    // Let's rebuild for maximum safety and cleanliness.
+    
     this.output = new Gain(0.8);
     this.compressor = new Compressor({ threshold: -20, ratio: 3, attack: 0.05, release: 0.25 });
     this.reverb = new Reverb({ decay: 3.5, preDelay: 0.01, wet: 0.35 });
@@ -145,7 +198,6 @@ class AudioService {
 
     const totalFiles = tasks.length;
     let loadedCount = 0;
-    const urlMap: Record<string, string> = {};
     
     const BATCH_SIZE = 8; 
     
@@ -158,12 +210,14 @@ class AudioService {
             try {
               const blob = await getCachedAudioBlob(task.url);
               
-              // Check abort again before creating URL to prevent leak
               if (this._isAborting) return;
 
-              const blobUrl = URL.createObjectURL(blob);
-              this.objectUrls.push(blobUrl);
-              urlMap[task.note] = blobUrl;
+              const arrayBuffer = await blob.arrayBuffer();
+              const audioBuffer = await getContext().decodeAudioData(arrayBuffer);
+              
+              // Store in Resource Layer
+              this.buffers.set(task.note, new ToneAudioBuffer(audioBuffer));
+              
             } catch (err) {
               console.warn(`Failed to load ${task.url}, skipping...`, err);
             }
@@ -174,55 +228,13 @@ class AudioService {
 
     if (this._isAborting) throw new Error("Loading cancelled by user.");
 
-    // Fix: Added timeout for Sampler loading to prevent indefinite hanging
-    const SAMPLER_LOAD_TIMEOUT = 20000; // 20 seconds timeout for decoding/initialization
+    // Pre-create the first sampler to verify everything works? 
+    // Or just mark as loaded. The rule says "Sampler ... recreated per session".
+    // So we don't need a sampler yet until we play.
+    // BUT: Manual play needs a sampler! 
+    // So we create a "Manual Play" sampler instance.
+    this.createSampler();
 
-    // Use a controlled pattern to properly clean up sampler if timeout occurs
-    let samplerInstance: Sampler | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let isResolved = false;
-
-    const sampler = await new Promise<Sampler>((resolve, reject) => {
-        timeoutId = setTimeout(() => {
-            if (!isResolved) {
-                isResolved = true;
-                // Clean up the sampler instance if it was created but loading timed out
-                if (samplerInstance) {
-                    try {
-                        samplerInstance.dispose();
-                    } catch (e) {
-                        // Ignore disposal errors
-                    }
-                }
-                reject(new Error("Audio decoding timed out"));
-            }
-        }, SAMPLER_LOAD_TIMEOUT);
-
-        samplerInstance = new Sampler({
-            urls: urlMap,
-            release: 1, // Default release
-            curve: "exponential",
-            volume: -2,
-            onload: () => {
-                if (!isResolved) {
-                    isResolved = true;
-                    if (timeoutId) clearTimeout(timeoutId);
-                    resolve(samplerInstance!);
-                }
-            },
-            onerror: (e) => {
-                console.error("Sampler Error", e);
-                if (!isResolved) {
-                    isResolved = true;
-                    if (timeoutId) clearTimeout(timeoutId);
-                    resolve(samplerInstance!); // Still resolve to allow partial functionality
-                }
-            }
-        });
-        if (this.output) samplerInstance.connect(this.output);
-    });
-
-    this.sampler = sampler;
     this.isLoaded = true;
     onProgress(100);
   }
@@ -232,14 +244,16 @@ class AudioService {
   }
 
   public startTone(note: string, velocity: number = 0.7) {
-    if (!this.isLoaded || !this.sampler) return;
-    // Async ensure context starts, but don't block note triggering
-    // If context is not running, start() will start ASAP after user interaction
+    if (!this.isLoaded) return;
+    
+    // Ensure sampler exists (auto-recreate if missing, e.g. after Stop)
+    if (!this.sampler) this.createSampler();
+    
     const ctx = getContext();
     if (ctx.state !== 'running') {
-      start().catch(() => {}); // Silently handle start failure
+      start().catch(() => {}); 
     }
-    this.sampler.triggerAttack(note, now(), velocity);
+    this.sampler?.triggerAttack(note, now(), velocity);
   }
 
   public stopTone(note: string) {
@@ -252,13 +266,17 @@ class AudioService {
     if (!isDown && this.sampler) this.sampler.releaseAll();
   }
 
+  // Schedule Logic
   public scheduleEvents(events: { note: string; time: number; duration: number; velocity: number }[], onNoteStart: (n: string) => void, onNoteStop: (n: string) => void, onEnd: () => void) {
-    this.stopSequence();
-    if (!this.sampler) return;
+    // 1. Force Stop & Clean previous session
+    this.resetPlayback(); 
+
+    // 2. Create NEW Sampler instance for this session
+    const sampler = this.createSampler();
+    if (!sampler) return;
     
     getTransport().bpm.value = 120;
     let maxTime = 0;
-    const sampler = this.sampler;
     
     events.forEach(event => {
         const startTime = event.time;
@@ -277,8 +295,20 @@ class AudioService {
 
   public play() { if (getContext().state !== 'running') start(); getTransport().start(); }
   public pause() { getTransport().pause(); }
-  public stopPlayback() { getTransport().stop(); if (this.sampler) this.sampler.releaseAll(); }
-  public stopSequence() { getTransport().stop(); getTransport().cancel(); if (this.sampler) this.sampler.releaseAll(); }
+  
+  // Implements: Stop -> Mute -> Destroy Instances -> Clear Transport
+  public resetPlayback() { 
+    // Stop Transport
+    getTransport().stop(); 
+    getTransport().cancel(); 
+    
+    // Destroy Sampler Instance
+    this.disposeSampler();
+  }
+  
+  // Legacy alias for compatibility (can be removed later)
+  public stopSequence() { this.resetPlayback(); }
+  
   public getCurrentTime(): number { return getTransport().seconds; }
 }
 

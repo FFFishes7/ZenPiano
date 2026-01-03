@@ -46,7 +46,8 @@ const enum GestureScrollPermission {
 
 const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNoteStop, status }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastNoteRef = useRef<string | null>(null);
+  // Tracks active touches: Map<TouchIdentifier, NoteName>
+  const activeTouchesRef = useRef<Map<number, string>>(new Map());
   
   // Responsive mobile detection - computed once and updated on resize
   const isMobile = useIsMobile(640);
@@ -102,23 +103,23 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   }, []);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (status === PianoStatus.PLAYING_SONG) return;
+    if (statusRef.current === PianoStatus.PLAYING_SONG) return;
     if (event.repeat) return;
     const key = event.key.toLowerCase();
     const note = keyBindingMap.get(key);
     if (note) {
-      onNoteStart(note);
+      onNoteStartRef.current(note);
     }
-  }, [onNoteStart, status, keyBindingMap]);
+  }, [keyBindingMap]);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
-    if (status === PianoStatus.PLAYING_SONG) return;
+    if (statusRef.current === PianoStatus.PLAYING_SONG) return;
     const key = event.key.toLowerCase();
     const note = keyBindingMap.get(key);
     if (note) {
-      onNoteStop(note);
+      onNoteStopRef.current(note);
     }
-  }, [onNoteStop, status, keyBindingMap]);
+  }, [keyBindingMap]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -137,14 +138,14 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   }, []);
 
   const handlePlayStart = useCallback((noteData: NoteDefinition) => {
-      if (status === PianoStatus.PLAYING_SONG) return;
-      onNoteStart(noteData.note);
-  }, [onNoteStart, status]);
+      if (statusRef.current === PianoStatus.PLAYING_SONG) return;
+      onNoteStartRef.current(noteData.note);
+  }, []);
   
   const handlePlayStop = useCallback((noteData: NoteDefinition) => {
-      if (status === PianoStatus.PLAYING_SONG) return;
-      onNoteStop(noteData.note);
-  }, [onNoteStop, status]);
+      if (statusRef.current === PianoStatus.PLAYING_SONG) return;
+      onNoteStopRef.current(noteData.note);
+  }, []);
 
   // Helper to register refs from PianoKey children
   const registerKey = useCallback((note: string, el: HTMLDivElement | null) => {
@@ -192,90 +193,107 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
       // Cache key rects FIRST (before any hit detection)
       cacheKeyRects();
       
-      const touch = e.touches[0];
-      const cx = touch.clientX;
-      const cy = touch.clientY;
-      
-      // Determine permission based on whether touch hits a key
-      const hitKey = findHitKey(cx, cy);
-      
       // During song playback: allow scrolling but disable note triggering
       if (statusRef.current === PianoStatus.PLAYING_SONG) {
         gestureScrollPermissionRef.current = GestureScrollPermission.ALLOW;
         return;
       }
       
-      if (hitKey) {
-        // Touch started on a key → DENY scroll, enable piano glissando
-        gestureScrollPermissionRef.current = GestureScrollPermission.DENY;
-        onNoteStartRef.current(hitKey);
-        lastNoteRef.current = hitKey;
-      } else {
-        // Touch started outside keys (scrollbar/padding) → ALLOW scroll
-        gestureScrollPermissionRef.current = GestureScrollPermission.ALLOW;
-      }
+      // Iterate through all changed touches (newly pressed fingers)
+      Array.from(e.changedTouches).forEach(touch => {
+          const cx = touch.clientX;
+          const cy = touch.clientY;
+          const hitKey = findHitKey(cx, cy);
+
+          if (hitKey) {
+            // If ANY touch starts on a key, we DENY scrolling for the session
+            gestureScrollPermissionRef.current = GestureScrollPermission.DENY;
+            
+            // Play the note and track this specific touch ID
+            onNoteStartRef.current(hitKey);
+            activeTouchesRef.current.set(touch.identifier, hitKey);
+          } else {
+            // Touch started outside keys.
+            // Only allow ALLOW if we aren't already DENYing (from another finger)
+            // and no keys are currently being held.
+            if (gestureScrollPermissionRef.current !== GestureScrollPermission.DENY && activeTouchesRef.current.size === 0) {
+                 gestureScrollPermissionRef.current = GestureScrollPermission.ALLOW;
+            }
+          }
+      });
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       const permission = gestureScrollPermissionRef.current;
-      const touch = e.touches[0];
       
       // ALLOW: let browser handle scroll natively, do nothing
       if (permission === GestureScrollPermission.ALLOW) {
         return;
       }
       
-      // Don't handle glissando during song playback
       if (statusRef.current === PianoStatus.PLAYING_SONG) return;
       
       // DENY: prevent scroll and handle piano glissando
       if (permission === GestureScrollPermission.DENY) {
-        e.preventDefault(); // This works because passive: false
+        if (e.cancelable) e.preventDefault(); // Prevent native scroll
         
-        const cx = touch.clientX;
-        const cy = touch.clientY;
-        
-        // Boundary detection: check if touch point is within container bounds
         const containerRect = container.getBoundingClientRect();
-        const isOutOfBounds = cx < containerRect.left || cx > containerRect.right ||
-                              cy < containerRect.top || cy > containerRect.bottom;
         
-        // If touch moves outside container bounds, release current note and skip detection
-        if (isOutOfBounds) {
-          if (lastNoteRef.current) {
-            onNoteStopRef.current(lastNoteRef.current);
-            lastNoteRef.current = null;
-          }
-          return;
-        }
-        
-        const note = findHitKey(cx, cy);
-        
-        if (note && note !== lastNoteRef.current) {
-          if (lastNoteRef.current) onNoteStopRef.current(lastNoteRef.current);
-          onNoteStartRef.current(note);
-          lastNoteRef.current = note;
-        } else if (!note && lastNoteRef.current) {
-          onNoteStopRef.current(lastNoteRef.current);
-          lastNoteRef.current = null;
-        }
+        Array.from(e.changedTouches).forEach(touch => {
+            const oldNote = activeTouchesRef.current.get(touch.identifier);
+            // If this touch ID isn't tracking a note, it might have started on scrollbar
+            // but we are now in DENY mode. We can choose to ignore it or let it pick up keys.
+            // Let's let it pick up keys (glissando behavior).
+
+            const cx = touch.clientX;
+            const cy = touch.clientY;
+            
+            // Boundary detection
+            const isOutOfBounds = cx < containerRect.left || cx > containerRect.right ||
+                                  cy < containerRect.top || cy > containerRect.bottom;
+            
+            if (isOutOfBounds) {
+                if (oldNote) {
+                  onNoteStopRef.current(oldNote);
+                  activeTouchesRef.current.delete(touch.identifier);
+                }
+                return;
+            }
+            
+            const newNote = findHitKey(cx, cy);
+            
+            if (newNote && newNote !== oldNote) {
+                if (oldNote) onNoteStopRef.current(oldNote);
+                onNoteStartRef.current(newNote);
+                activeTouchesRef.current.set(touch.identifier, newNote);
+            } else if (!newNote && oldNote) {
+                onNoteStopRef.current(oldNote);
+                activeTouchesRef.current.delete(touch.identifier);
+            }
+        });
       }
     };
 
-    const handleTouchEnd = () => {
-      if (lastNoteRef.current) {
-        onNoteStopRef.current(lastNoteRef.current);
-        lastNoteRef.current = null;
+    const handleTouchEnd = (e: TouchEvent) => {
+      Array.from(e.changedTouches).forEach(touch => {
+          const note = activeTouchesRef.current.get(touch.identifier);
+          if (note) {
+              onNoteStopRef.current(note);
+              activeTouchesRef.current.delete(touch.identifier);
+          }
+      });
+      
+      if (activeTouchesRef.current.size === 0) {
+        gestureScrollPermissionRef.current = GestureScrollPermission.NONE;
       }
-      gestureScrollPermissionRef.current = GestureScrollPermission.NONE;
     };
 
     // Helper function to release all notes
     const releaseAllNotes = () => {
-      if (lastNoteRef.current) {
-        onNoteStopRef.current(lastNoteRef.current);
-        lastNoteRef.current = null;
-      }
+      activeTouchesRef.current.forEach(note => {
+          onNoteStopRef.current(note);
+      });
+      activeTouchesRef.current.clear();
       gestureScrollPermissionRef.current = GestureScrollPermission.NONE;
     };
 

@@ -115,7 +115,7 @@ export const useSongPlayer = ({
         const n = normalizeNote(note);
         if (n) {
           setActiveNotes(prev => {
-            const next = new Map(prev);
+            const next = new Map<string, number>(prev);
             const currentCount = next.get(n) || 0;
             next.set(n, currentCount + 1);
             return next;
@@ -128,7 +128,7 @@ export const useSongPlayer = ({
         const n = normalizeNote(note);
         if (n) {
           setActiveNotes(prev => {
-            const next = new Map(prev);
+            const next = new Map<string, number>(prev);
             const currentCount = next.get(n) || 0;
             if (currentCount <= 1) {
               next.delete(n);
@@ -142,20 +142,20 @@ export const useSongPlayer = ({
       // onEnd
       () => {
         if (currentId !== generationIdRef.current) return;
-        audioService.stopPlayback();
+        audioService.resetPlayback();
         setStatus(PianoStatus.READY);
         clearAllNotes();
       }
     );
   }, [setActiveNotes, clearAllNotes]);
 
+
   /**
    * Process and play MIDI data
    */
   const processAndPlayMidi = useCallback(async (arrayBuffer: ArrayBuffer, name: string) => {
-    // Stop any currently playing content first
-    audioService.stopSequence();
-    audioService.stopPlayback();
+    // Stop any currently playing content first & destroy old instances
+    audioService.resetPlayback();
     clearAllNotes();
 
     const currentId = ++generationIdRef.current;
@@ -235,9 +235,8 @@ export const useSongPlayer = ({
    * AI generate and play song
    */
   const handleGenerateAndPlay = useCallback(async (prompt: string) => {
-    // Stop any currently playing content first
-    audioService.stopSequence();
-    audioService.stopPlayback();
+    // Stop any currently playing content first & destroy old instances
+    audioService.resetPlayback();
     clearAllNotes();
 
     setStatus(PianoStatus.FETCHING_AI);
@@ -286,7 +285,7 @@ export const useSongPlayer = ({
   }, []);
 
   const handleStop = useCallback(() => {
-    audioService.stopSequence();
+    audioService.resetPlayback(); // Completely stop, clear, and DESTROY instances
     setStatus(PianoStatus.IDLE);
     clearAllNotes();
     setPlaybackProgress(0);
