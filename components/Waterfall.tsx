@@ -39,8 +39,6 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
     const TOTAL_WIDTH = TOTAL_KEYS * COLUMN_WIDTH;
     const PIXELS_PER_SECOND = 200; 
 
-    const LATENCY_CORRECTION = 0.1;
-
     // PERFORMANCE OPTIMIZATION: Use useRef instead of useState for scroll position
     // to avoid triggering React re-renders on every scroll frame.
     // Initial value -1 means uninitialized, will be calculated based on container width on first render
@@ -250,7 +248,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             const currentEvents = eventsRef.current;
             const currentActiveNotes = activeNotesRef.current;
             
-            const currentTime = Math.max(0, audioService.getCurrentTime() - LATENCY_CORRECTION);
+            const currentTime = Math.max(0, audioService.getCurrentTime());
 
             // Only redraw static grid layer when scroll position changes
             if (currentScrollLeft !== lastScrollLeftRef.current) {
