@@ -122,8 +122,11 @@ class AudioService {
         if (document.hidden) {
           this.handlePassiveSuspend();
         } else {
-          // Anti-pop when coming back: instant mute to clear potential ghost noises
-          if (this.output) this.output.gain.value = 0;
+          // ANTI-POP: Shield against residual audio leaking on Safari resume.
+          if (this.output) {
+              this.output.gain.cancelScheduledValues(now());
+              this.output.gain.value = 0;
+          }
         }
       });
     }
@@ -133,19 +136,25 @@ class AudioService {
    * Internal helper to handle passive suspension (from either statechange or visibilitychange)
    */
   private handlePassiveSuspend() {
-    // DO anti-pop (Fade Out) for passive suspend
+    // 1. Immediate mute
     if (this.output) {
-        this.output.gain.rampTo(0, 0.05); 
+        this.output.gain.cancelScheduledValues(now());
+        this.output.gain.value = 0; 
     }
 
-    setTimeout(() => {
-        getTransport().pause();
-        if (this.sampler) this.sampler.releaseAll();
-        this.disposeSampler();
-        if (this.passivePauseHandler) {
-            this.passivePauseHandler();
-        }
-    }, 50);
+    // 2. Immediate cleanup
+    getTransport().pause();
+    if (this.sampler) {
+        try {
+            this.sampler.releaseAll();
+            this.sampler.disconnect();
+        } catch (e) {}
+    }
+    this.disposeSampler();
+    
+    if (this.passivePauseHandler) {
+        this.passivePauseHandler();
+    }
   }
 
   /**
@@ -289,6 +298,13 @@ class AudioService {
     if (!this.sampler) this.createSampler();
     
     this.ensureContext();
+
+    // FORCE UNMUTE on manual key press
+    if (this.output) {
+        this.output.gain.cancelScheduledValues(now());
+        this.output.gain.value = 0.8;
+    }
+    
     this.sampler?.triggerAttack(note, now(), velocity);
   }
 
@@ -379,8 +395,11 @@ class AudioService {
         this.rebuildAndSchedule();
     }
     
-    // Ensure instant volume on play
-    if (this.output) this.output.gain.value = 0.8;
+    // FORCE UNMUTE on play
+    if (this.output) {
+        this.output.gain.cancelScheduledValues(now());
+        this.output.gain.value = 0.8;
+    }
     
     getTransport().start(); 
   }
@@ -392,8 +411,9 @@ class AudioService {
   }
   
   public resetPlayback() { 
-    // INSTANT mute when entering READY state
+    // Synchronously mute to block noise leakage
     if (this.output) {
+        this.output.gain.cancelScheduledValues(now());
         this.output.gain.value = 0;
     }
 
