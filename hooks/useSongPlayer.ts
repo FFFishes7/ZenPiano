@@ -101,54 +101,66 @@ export const useSongPlayer = ({
   }, [status, totalDuration]);
 
   /**
-   * Schedule note events for playback
+   * Schedule note events for playback (Cache Phase)
    */
   const schedulePlayback = useCallback((
-    events: FlatNoteEvent[],
-    currentId: number
+    events: FlatNoteEvent[]
   ) => {
-    audioService.scheduleEvents(
-      events,
-      // onNoteStart
-      (note) => {
-        if (currentId !== generationIdRef.current) return;
-        const n = normalizeNote(note);
-        if (n) {
-          setActiveNotes(prev => {
-            const next = new Map<string, number>(prev);
-            const currentCount = next.get(n) || 0;
-            next.set(n, currentCount + 1);
-            return next;
-          });
-        }
-      },
-      // onNoteStop
-      (note) => {
-        if (currentId !== generationIdRef.current) return;
-        const n = normalizeNote(note);
-        if (n) {
-          setActiveNotes(prev => {
-            const next = new Map<string, number>(prev);
-            const currentCount = next.get(n) || 0;
-            if (currentCount <= 1) {
-              next.delete(n);
-            } else {
-              next.set(n, currentCount - 1);
-            }
-            return next;
-          });
-        }
-      },
-      // onEnd
-      () => {
-        if (currentId !== generationIdRef.current) return;
-        audioService.resetPlayback();
-        setStatus(PianoStatus.READY);
-        clearAllNotes();
-      }
-    );
-  }, [setActiveNotes, clearAllNotes]);
+    // Just cache the data in the service. Callbacks will be provided at Play time.
+    audioService.scheduleEvents(events);
+  }, []);
 
+  const handlePlay = useCallback(() => {
+    let callbacks = undefined;
+
+    // Session ID management: only increment if we are NOT resuming from pause.
+    // This marks the start of a "New Play Session" and generates fresh callbacks.
+    if (status !== PianoStatus.PAUSED) {
+      const newId = ++generationIdRef.current;
+      
+      callbacks = {
+        onNoteStart: (note: string) => {
+          if (newId !== generationIdRef.current) return;
+          const n = normalizeNote(note);
+          if (n) {
+            setActiveNotes(prev => {
+              const next = new Map<string, number>(prev);
+              const currentCount = next.get(n) || 0;
+              next.set(n, currentCount + 1);
+              return next;
+            });
+          }
+        },
+        onNoteStop: (note: string) => {
+          if (newId !== generationIdRef.current) return;
+          const n = normalizeNote(note);
+          if (n) {
+            setActiveNotes(prev => {
+              const next = new Map<string, number>(prev);
+              const currentCount = next.get(n) || 0;
+              if (currentCount <= 1) {
+                next.delete(n);
+              } else {
+                next.set(n, currentCount - 1);
+              }
+              return next;
+            });
+          }
+        },
+        onEnd: () => {
+          if (newId !== generationIdRef.current) return;
+          audioService.resetPlayback();
+          setStatus(PianoStatus.READY);
+          clearAllNotes();
+        }
+      };
+    }
+    
+    // If callbacks are provided, AudioService will use them for a fresh rebuild.
+    // If undefined (Resume), it uses the active session callbacks.
+    audioService.play(callbacks);
+    setStatus(PianoStatus.PLAYING_SONG);
+  }, [status, setActiveNotes, clearAllNotes]);
 
   /**
    * Process and play MIDI data
@@ -198,21 +210,22 @@ export const useSongPlayer = ({
         description: 'Imported MIDI', 
         tempo: 0, 
         events: [],
-        maxDuration: maxDuration // Set calculated max duration
+        maxDuration: maxDuration 
       });
 
       await audioService.ensureContext();
 
       if (currentId !== generationIdRef.current) return;
 
-      schedulePlayback(events, currentId);
+      schedulePlayback(events);
+      // Auto-play removed per user request. Status stays at READY.
     } catch (e) {
       if (currentId !== generationIdRef.current) return;
       console.error(e);
       alert('Failed to parse MIDI');
       setStatus(PianoStatus.IDLE);
     }
-  }, [clearAllNotes, schedulePlayback]);
+  }, [clearAllNotes, schedulePlayback, handlePlay]);
 
   /**
    * Upload MIDI file
@@ -250,7 +263,6 @@ export const useSongPlayer = ({
 
       const flat = getFlatEvents(songData);
       
-      // Calculate max duration for AI songs
       const maxDuration = flat.reduce((max, event) => Math.max(max, event.duration), 0);
       songData.maxDuration = maxDuration;
 
@@ -265,19 +277,15 @@ export const useSongPlayer = ({
 
       if (currentId !== generationIdRef.current) return;
 
-      schedulePlayback(flat, currentId);
+      schedulePlayback(flat);
+      // Auto-play removed per user request. Status stays at READY.
     } catch (error) {
       if (currentId !== generationIdRef.current) return;
       console.error(error);
       alert('Failed to generate song.');
       setStatus(PianoStatus.IDLE);
     }
-  }, [clearAllNotes, schedulePlayback]);
-
-  const handlePlay = useCallback(() => {
-    audioService.play();
-    setStatus(PianoStatus.PLAYING_SONG);
-  }, []);
+  }, [clearAllNotes, schedulePlayback, handlePlay]);
 
   const handlePause = useCallback(() => {
     audioService.pause();
@@ -290,6 +298,8 @@ export const useSongPlayer = ({
     clearAllNotes();
     setPlaybackProgress(0);
     setCurrentSong(null);
+    setFlatEvents([]); // Clear the note events so Waterfall view becomes empty
+    // Incrementing session ID here invalidates any pending async callbacks from the previous session.
     generationIdRef.current++;
   }, [clearAllNotes]);
 

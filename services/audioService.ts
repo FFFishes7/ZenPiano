@@ -86,18 +86,36 @@ class AudioService {
   // RESOURCE LAYER: Decoded AudioBuffers (Global Cache, never destroyed)
   private buffers: Map<string, ToneAudioBuffer> = new Map();
 
-  // CONTEXT LAYER: Managed by Tone.js / Browser
-
   // INSTANCE LAYER: Disposable components
   private sampler: Sampler | null = null;
   private reverb: Reverb | null = null;
   private compressor: Compressor | null = null;
   private output: Gain | null = null;
+
+  // PLAYBACK DATA CACHE: Holds data for the next "Play" session
+  private cachedEvents: { note: string; time: number; duration: number; velocity: number }[] = [];
+  
+  // ACTIVE SESSION STATE: Callbacks for the currently running (or paused) session
+  private activeCallbacks: {
+    onNoteStart: (n: string) => void;
+    onNoteStop: (n: string) => void;
+    onEnd: () => void;
+  } | null = null;
   
   public isLoaded = false;
   private _isSustainPedalDown = false;
   private currentQuality: AudioQuality = 'LIGHT';
   private _isAborting = false;
+
+  constructor() {
+    // Passive Suspend Handling: strictly follow the rule "distrust suspend"
+    // If the context state changes (e.g. browser backgrounding), we clean up the instance layer.
+    getContext().on('statechange', (state) => {
+      if (state === 'suspended' || state === 'closed') {
+        this.disposeSampler();
+      }
+    });
+  }
 
   // Cleanup all disposable resources (Instance Layer)
   private _disposeResources() {
@@ -108,7 +126,6 @@ class AudioService {
     if (this.output) { this.output.dispose(); this.output = null; }
   }
   
-  // Public method to explicitly destroy the sampler instance (Stop logic)
   public disposeSampler() {
     if (this.sampler) {
       try { 
@@ -122,18 +139,16 @@ class AudioService {
     }
   }
 
-  // Create a new Sampler instance from cached buffers
   private createSampler(): Sampler {
-    if (this.sampler) return this.sampler; // Return existing if valid
+    if (this.sampler) return this.sampler; 
     
-    // Map buffers to a format Tone.Sampler accepts (note -> buffer)
     const bufferMap: Record<string, ToneAudioBuffer> = {};
     this.buffers.forEach((buffer, note) => {
         bufferMap[note] = buffer;
     });
 
     const sampler = new Sampler({
-        urls: bufferMap, // Pass buffers directly!
+        urls: bufferMap,
         release: 1, 
         curve: "exponential",
         volume: -2,
@@ -141,6 +156,9 @@ class AudioService {
     
     if (this.output) {
         sampler.connect(this.output);
+    } else {
+        // Fallback to destination if gain nodes are missing for some reason
+        sampler.toDestination();
     }
     
     this.sampler = sampler;
@@ -150,8 +168,6 @@ class AudioService {
   public cancelLoading() {
     this._isAborting = true;
     this._disposeResources();
-    // Also clear buffers if loading is cancelled midway to ensure clean state?
-    // Actually, keeping buffers is fine, but let's just clear for safety if it was partial.
     this.buffers.forEach(b => b.dispose());
     this.buffers.clear();
   }
@@ -159,9 +175,6 @@ class AudioService {
   public async loadSamples(onProgress: (val: number) => void, quality: AudioQuality): Promise<void> {
     await this.ensureContext();
     this._disposeResources();
-    // Do NOT clear this.buffers here if we want to support re-loading (switching quality)
-    // But since we only have one quality now, let's clear to be safe or check diff.
-    // For now, assume reload = fresh start.
     this.buffers.forEach(b => b.dispose());
     this.buffers.clear();
 
@@ -169,15 +182,7 @@ class AudioService {
     this._isAborting = false;
     this.isLoaded = false;
 
-    // Setup Effect Chain (Instance Layer - but long lived for the app session usually)
-    // Actually, per rules, effects are part of context/graph. 
-    // Let's keep them alive or recreate? 
-    // The prompt says "Sampler / Synth / Voices" are disposable. 
-    // Effects are usually expensive to recreate. Let's recreate them to be safe on "Import", 
-    // or keep them. The rule says "Destroy all Sampler/Synth/Player".
-    // It implies the "source" nodes. Effect chain can persist or be rebuilt.
-    // Let's rebuild for maximum safety and cleanliness.
-    
+    // Build the effect chain (Master Gain is this.output)
     this.output = new Gain(0.8);
     this.compressor = new Compressor({ threshold: -20, ratio: 3, attack: 0.05, release: 0.25 });
     this.reverb = new Reverb({ decay: 3.5, preDelay: 0.01, wet: 0.35 });
@@ -209,15 +214,11 @@ class AudioService {
             if (this._isAborting) return;
             try {
               const blob = await getCachedAudioBlob(task.url);
-              
               if (this._isAborting) return;
 
               const arrayBuffer = await blob.arrayBuffer();
               const audioBuffer = await getContext().decodeAudioData(arrayBuffer);
-              
-              // Store in Resource Layer
               this.buffers.set(task.note, new ToneAudioBuffer(audioBuffer));
-              
             } catch (err) {
               console.warn(`Failed to load ${task.url}, skipping...`, err);
             }
@@ -228,11 +229,7 @@ class AudioService {
 
     if (this._isAborting) throw new Error("Loading cancelled by user.");
 
-    // Pre-create the first sampler to verify everything works? 
-    // Or just mark as loaded. The rule says "Sampler ... recreated per session".
-    // So we don't need a sampler yet until we play.
-    // BUT: Manual play needs a sampler! 
-    // So we create a "Manual Play" sampler instance.
+    // Resource layer ready. Instance layer starts with a fresh sampler for manual playing.
     this.createSampler();
 
     this.isLoaded = true;
@@ -240,19 +237,20 @@ class AudioService {
   }
 
   public async ensureContext() {
-    if (getContext().state !== 'running') await start();
+    if (getContext().state !== 'running') {
+        try {
+            await start();
+        } catch (e) {
+            console.warn("Tone.start() failed, context might still be suspended:", e);
+        }
+    }
   }
 
   public startTone(note: string, velocity: number = 0.7) {
     if (!this.isLoaded) return;
-    
-    // Ensure sampler exists (auto-recreate if missing, e.g. after Stop)
     if (!this.sampler) this.createSampler();
     
-    const ctx = getContext();
-    if (ctx.state !== 'running') {
-      start().catch(() => {}); 
-    }
+    this.ensureContext();
     this.sampler?.triggerAttack(note, now(), velocity);
   }
 
@@ -266,48 +264,98 @@ class AudioService {
     if (!isDown && this.sampler) this.sampler.releaseAll();
   }
 
-  // Schedule Logic
-  public scheduleEvents(events: { note: string; time: number; duration: number; velocity: number }[], onNoteStart: (n: string) => void, onNoteStop: (n: string) => void, onEnd: () => void) {
-    // 1. Force Stop & Clean previous session
-    this.resetPlayback(); 
-
-    // 2. Create NEW Sampler instance for this session
-    const sampler = this.createSampler();
-    if (!sampler) return;
+  /**
+   * Import Phase: Strictly store data.
+   */
+  public scheduleEvents(
+      events: { note: string; time: number; duration: number; velocity: number }[]
+  ) {
+    // Store data in the Service layer (Cache)
+    this.cachedEvents = events;
     
+    // Invalidate instance layer to force rebuild on next "Play"
+    this.resetPlayback();
+  }
+
+  /**
+   * Internal helper to perform the actual reconstruction and scheduling.
+   * Called only when Play is triggered from a non-paused state.
+   */
+  private rebuildAndSchedule() {
+    if (!this.activeCallbacks) return;
+
+    // 1. Ensure absolute clean slate
+    this.disposeSampler();
+    getTransport().cancel();
+    
+    // 2. Fresh Instance Layer
+    const sampler = this.createSampler();
+    
+    // 3. Schedule all notes on the Transport timeline
+    const { onNoteStart, onNoteStop, onEnd } = this.activeCallbacks;
     getTransport().bpm.value = 120;
     let maxTime = 0;
     
-    events.forEach(event => {
+    this.cachedEvents.forEach(event => {
         const startTime = event.time;
         const endTime = event.time + event.duration;
         if (endTime > maxTime) maxTime = endTime;
+        
         getTransport().schedule((time) => {
             sampler.triggerAttackRelease(event.note, event.duration, time, event.velocity);
             getDraw().schedule(() => onNoteStart(event.note), time);
         }, startTime);
+        
         getTransport().schedule((time) => {
             getDraw().schedule(() => onNoteStop(event.note), time);
         }, endTime);
     });
+    
     getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 1);
   }
 
-  public play() { if (getContext().state !== 'running') start(); getTransport().start(); }
-  public pause() { getTransport().pause(); }
-  
-  // Implements: Stop -> Mute -> Destroy Instances -> Clear Transport
-  public resetPlayback() { 
-    // Stop Transport
-    getTransport().stop(); 
-    getTransport().cancel(); 
+  public async play(callbacks?: {
+      onNoteStart: (n: string) => void;
+      onNoteStop: (n: string) => void;
+      onEnd: () => void;
+  }) { 
+    await this.ensureContext();
     
-    // Destroy Sampler Instance
-    this.disposeSampler();
+    // If callbacks are provided, this is a FRESH play (not a resume).
+    // Update the active session callbacks.
+    if (callbacks) {
+        this.activeCallbacks = callbacks;
+    }
+
+    // Play Logic:
+    // If sampler is null, it means we are starting from READY/STOP/SUSPEND state.
+    // In this case, we MUST perform a full rebuild and reschedule.
+    if (!this.sampler) {
+        this.rebuildAndSchedule();
+    }
+    
+    // Resume Logic:
+    // If sampler already exists, we are just resuming from PAUSE.
+    // Tone.Transport.start() will naturally resume from the current time.
+    getTransport().start(); 
+  }
+
+  public pause() { 
+    getTransport().pause(); 
+    // Rule: Mute on pause (natural release)
+    if (this.sampler) this.sampler.releaseAll();
   }
   
-  // Legacy alias for compatibility (can be removed later)
+  public resetPlayback() { 
+    getTransport().stop(); 
+    getTransport().cancel(); 
+    this.disposeSampler();
+    // Clear active session callbacks as the session is over
+    this.activeCallbacks = null;
+  }
+  
   public stopSequence() { this.resetPlayback(); }
+  public stopPlayback() { this.resetPlayback(); }
   
   public getCurrentTime(): number { return getTransport().seconds; }
 }

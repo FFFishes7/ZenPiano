@@ -68,7 +68,14 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
     const eventsRef = useRef(mappedEvents);
 
     // Sync props to refs for the animation loop
-    useEffect(() => { eventsRef.current = mappedEvents; }, [mappedEvents]);
+    useEffect(() => { 
+        eventsRef.current = mappedEvents; 
+        // Force a re-render when events change (e.g. cleared on Stop), 
+        // especially important when NOT playing (animation loop is stopped).
+        if (renderRef.current) {
+            renderRef.current();
+        }
+    }, [mappedEvents]);
     useEffect(() => { activeNotesRef.current = activeNotes; }, [activeNotes]);
 
     const handleWheel = useCallback((e: React.WheelEvent) => {

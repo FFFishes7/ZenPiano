@@ -84,7 +84,6 @@ const App: React.FC = () => {
   // ==================== Stop Playback (Reset View Mode) ====================
   const handleStop = useCallback(() => {
     songPlayerStop();
-    setViewMode('PIANO');
   }, [songPlayerStop]);
 
   // ==================== Drag and Drop Handling ====================
@@ -194,7 +193,6 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col w-full max-w-[90rem] mx-auto px-4 min-h-0 relative z-0 pt-14 landscape:pt-2 pb-2">
         {/* View Switch Button */}
         <div className="flex-none flex justify-end w-full max-w-7xl h-10 landscape:h-8 items-start mb-2 landscape:mb-1">
-          {currentSong && (
             <button
               onClick={toggleViewMode}
               className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow text-xs text-slate-600 transition-all z-50"
@@ -237,7 +235,6 @@ const App: React.FC = () => {
                 </>
               )}
             </button>
-          )}
         </div>
 
         {/* Piano/Waterfall View */}
