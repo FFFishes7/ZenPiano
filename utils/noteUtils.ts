@@ -3,6 +3,9 @@
  * Centralized logic for note normalization, validation, conversion, etc.
  */
 
+import { FlatNoteEvent, MappedNoteEvent } from '../types';
+import { PIANO_KEYS } from '../constants';
+
 // Set of valid note names
 const VALID_NOTE_NAMES = new Set([
   'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B',
@@ -114,4 +117,61 @@ export const getNoteName = (note: string): string | null => {
   const match = note.match(NOTE_PATTERN);
   if (!match) return null;
   return match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+};
+
+/**
+ * Binary search to find the first event index that starts at or after the given time
+ */
+export const findStartIndex = (events: FlatNoteEvent[] | MappedNoteEvent[], time: number): number => {
+    let low = 0;
+    let high = events.length - 1;
+    while (low <= high) {
+        const mid = (low + high) >>> 1;
+        if (events[mid].time < time) {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return low;
+};
+
+/**
+ * Pre-process note events: map key index, filter invalid, and sort by time
+ */
+export const prepareNoteEvents = (events: FlatNoteEvent[]): MappedNoteEvent[] => {
+    return events.map(event => ({
+        ...event,
+        keyIndex: PIANO_KEYS.findIndex(k => k.note === event.note)
+    }))
+    .filter(e => e.keyIndex !== -1)
+    .sort((a, b) => a.time - b.time);
+};
+
+/**
+ * Calculate the set of notes that are mathematically active at the current time.
+ * This is used for zero-latency rendering of visual indicators.
+ */
+export const getMathematicallyActiveNotes = (
+    events: FlatNoteEvent[] | MappedNoteEvent[],
+    currentTime: number,
+    maxDuration: number
+): Set<string> => {
+    const activeNotes = new Set<string>();
+    if (events.length === 0) return activeNotes;
+
+    // Use dynamic look-back based on the longest note to find any notes still playing
+    const minVisibleStartTime = currentTime - (maxDuration + 2.0);
+    const startIndex = findStartIndex(events, minVisibleStartTime);
+
+    for (let i = startIndex; i < events.length; i++) {
+        const event = events[i];
+        if (event.time > currentTime) break; // Future event
+        
+        // If current time is between start and end of the note
+        if (currentTime > event.time && currentTime <= event.time + event.duration) {
+            activeNotes.add(event.note);
+        }
+    }
+    return activeNotes;
 };

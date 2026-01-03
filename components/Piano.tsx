@@ -1,8 +1,10 @@
+
 import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { PIANO_KEYS } from '../constants';
 import { NoteDefinition, PianoStatus, FlatNoteEvent } from '../types';
 import PianoKey from './PianoKey';
 import { audioService } from '../services/audioService';
+import { prepareNoteEvents, getMathematicallyActiveNotes } from '../utils/noteUtils';
 
 function useIsMobile(breakpoint: number = 640): boolean {
   const [isMobile, setIsMobile] = useState(() => 
@@ -25,18 +27,8 @@ interface PianoProps {
   onNoteStop: (note: string) => void;
   status: PianoStatus;
   events: FlatNoteEvent[];
+  maxDuration: number;
 }
-
-const findStartIndex = (events: any[], time: number): number => {
-    let low = 0;
-    let high = events.length - 1;
-    while (low <= high) {
-        const mid = (low + high) >>> 1;
-        if (events[mid].time < time) low = mid + 1;
-        else high = mid - 1;
-    }
-    return low;
-};
 
 interface KeyRect {
   note: string;
@@ -56,7 +48,14 @@ const WHITE_INACTIVE_CLASSES = ['bg-white', 'shadow-md', 'hover:shadow-lg', 'hov
 const BLACK_ACTIVE_CLASSES = ['bg-black', 'shadow-none', 'scale-[0.99]', 'translate-y-0.5', 'border-slate-900'];
 const BLACK_INACTIVE_CLASSES = ['shadow-xl', 'bg-gradient-to-b', 'from-slate-800', 'to-slate-900'];
 
-const Piano: React.FC<PianoProps> = React.memo(({ activeNotesRef, onNoteStart, onNoteStop, status, events }) => {
+const Piano: React.FC<PianoProps> = React.memo(({ 
+    activeNotesRef, 
+    onNoteStart, 
+    onNoteStop, 
+    status, 
+    events,
+    maxDuration 
+}) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const activeTouchesRef = useRef<Map<number, string>>(new Map());
   const prevActiveNotesRef = useRef(new Set<string>());
@@ -70,12 +69,24 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotesRef, onNoteStart, o
   const statusRef = useRef(status);
   const onNoteStartRef = useRef(onNoteStart);
   const onNoteStopRef = useRef(onNoteStop);
-  const eventsRef = useRef(events);
+
+  // --- USE SHARED PRE-PROCESSING ---
+  const mappedEvents = useMemo(() => prepareNoteEvents(events), [events]);
+
+  const eventsRef = useRef(mappedEvents);
+  const maxDurationRef = useRef(maxDuration);
+
+  useEffect(() => { 
+      eventsRef.current = mappedEvents; 
+  }, [mappedEvents]);
+
+  useEffect(() => { 
+      maxDurationRef.current = maxDuration; 
+  }, [maxDuration]);
 
   useEffect(() => { statusRef.current = status; }, [status]);
   useEffect(() => { onNoteStartRef.current = onNoteStart; }, [onNoteStart]);
   useEffect(() => { onNoteStopRef.current = onNoteStop; }, [onNoteStop]);
-  useEffect(() => { eventsRef.current = events; }, [events]);
   
   useEffect(() => {
     let animationFrameId: number;
@@ -86,20 +97,15 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotesRef, onNoteStart, o
       const keys = keysRef.current;
       const currentEvents = eventsRef.current;
       
-      const currentTime = audioService.getCurrentTime();
-      const isPlaying = statusRef.current === PianoStatus.PLAYING_SONG || statusRef.current === PianoStatus.PAUSED;
+      const currentTime = Math.max(0, audioService.getCurrentTime());
+      
+      const isActuallyPlaying = statusRef.current === PianoStatus.PLAYING_SONG;
+      const isPausedMidSong = statusRef.current === PianoStatus.PAUSED && currentTime > 0.05;
+      const shouldShowMathNotes = isActuallyPlaying || isPausedMidSong;
 
-      const mathematicallyActiveNotes = new Set<string>();
-      if (isPlaying && currentEvents.length > 0) {
-          const searchIndex = findStartIndex(currentEvents, currentTime - 2.0);
-          for (let i = searchIndex; i < currentEvents.length; i++) {
-              const event = currentEvents[i];
-              if (event.time > currentTime) break;
-              if (currentTime > event.time && currentTime <= event.time + event.duration) {
-                  mathematicallyActiveNotes.add(event.note);
-              }
-          }
-      }
+      const mathematicallyActiveNotes = shouldShowMathNotes 
+        ? getMathematicallyActiveNotes(currentEvents, currentTime, maxDurationRef.current)
+        : new Set<string>();
 
       let hasChanged = false;
 
@@ -123,16 +129,12 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotesRef, onNoteStart, o
       
       // Lift keys no longer active
       prevNotes.forEach(note => {
-          if (!currentActiveSet.has(note)) {
-              updateKeyVisual(note, false);
-          }
+          if (!currentActiveSet.has(note)) updateKeyVisual(note, false);
       });
 
       // Press keys now active
       currentActiveSet.forEach(note => {
-          if (!prevNotes.has(note)) {
-              updateKeyVisual(note, true);
-          }
+          if (!prevNotes.has(note)) updateKeyVisual(note, true);
       });
 
       if (hasChanged || currentActiveSet.size !== prevNotes.size) {

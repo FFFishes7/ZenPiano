@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { PIANO_KEYS } from '../constants';
 import { audioService } from '../services/audioService';
 import { FlatNoteEvent } from '../types';
+import { prepareNoteEvents, findStartIndex, getMathematicallyActiveNotes } from '../utils/noteUtils';
 
 interface WaterfallProps {
     events: FlatNoteEvent[];
@@ -10,22 +11,6 @@ interface WaterfallProps {
     isPlaying: boolean;
     maxDuration: number;
 }
-
-// Binary search to find the first event index that starts at or after the given time
-const findStartIndex = (events: any[], time: number): number => {
-    let low = 0;
-    let high = events.length - 1;
-    
-    while (low <= high) {
-        const mid = (low + high) >>> 1;
-        if (events[mid].time < time) {
-            low = mid + 1;
-        } else {
-            high = mid - 1;
-        }
-    }
-    return low;
-};
 
 export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotesRef, isPlaying, maxDuration }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -57,14 +42,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
     const initialScrollRef = useRef(0);
 
     // Optimization: Pre-calculate key indices and Ensure Sorted by time for Binary Search
-    const mappedEvents = useMemo(() => {
-        return events.map(event => ({
-            ...event,
-            keyIndex: PIANO_KEYS.findIndex(k => k.note === event.note)
-        }))
-        .filter(e => e.keyIndex !== -1)
-        .sort((a, b) => a.time - b.time); // Critical for binary search
-    }, [events]);
+    const mappedEvents = useMemo(() => prepareNoteEvents(events), [events]);
 
     const eventsRef = useRef(mappedEvents);
 
@@ -267,18 +245,11 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             // --- CALCULATE MATHEMATICALLY ACTIVE NOTES FROM EVENTS ---
             // This ensures the bottom keyboard is perfectly synced with the visuals,
             // bypassing any JS callback jitter.
-            const mathematicallyActiveNotes = new Set<string>();
-            if (currentEvents.length > 0) {
-                // Use a smaller window for look-up to find notes that are CURRENTLY at the hit line
-                const searchIndex = findStartIndex(currentEvents, currentTime - 2.0); // look back up to 2s
-                for (let i = searchIndex; i < currentEvents.length; i++) {
-                    const event = currentEvents[i];
-                    if (event.time > currentTime) break; // Note hasn't reached hit line yet
-                    if (currentTime > event.time && currentTime <= event.time + event.duration) {
-                        mathematicallyActiveNotes.add(event.note);
-                    }
-                }
-            }
+            const mathematicallyActiveNotes = getMathematicallyActiveNotes(
+                currentEvents, 
+                currentTime, 
+                maxDurationRef.current
+            );
 
             // --- OPTIMIZED NOTE RENDERING ---
             // Skip note rendering if no events

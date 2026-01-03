@@ -42,6 +42,13 @@ export interface FlatNoteEvent {
 }
 
 /**
+ * Mapped note event with pre-calculated key index
+ */
+export interface MappedNoteEvent extends FlatNoteEvent {
+  keyIndex: number;
+}
+
+/**
  * Piano status enum
  */
 export enum PianoStatus {
