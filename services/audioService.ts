@@ -1,4 +1,3 @@
-
 import { 
   Sampler, 
   Reverb, 
@@ -86,7 +85,7 @@ class AudioService {
         if (document.hidden) {
           this.handlePassiveSuspend();
         } else {
-          this.mute(); // ANTI-POP barrier
+          this.mute(); 
         }
       });
     }
@@ -96,7 +95,13 @@ class AudioService {
     this.mute();
     getTransport().pause();
     if (this.sampler) {
-        try { this.sampler.releaseAll(); } catch (e) {}
+        try { 
+            const originalRelease = this.sampler.release;
+            this.sampler.release = 0;
+            this.sampler.releaseAll();
+            this.sampler.release = originalRelease;
+            this.sampler.volume.value = -100;
+        } catch (e) {}
     }
     if (this.passivePauseHandler) this.passivePauseHandler();
   }
@@ -104,20 +109,15 @@ class AudioService {
   public setPassivePauseHandler(handler: () => void) { this.passivePauseHandler = handler; }
 
   private _disposeResources() {
-    if (this.sampler) { this.sampler.dispose(); this.sampler = null; }
-    if (this.reverb) { this.reverb.dispose(); this.reverb = null; }
-    if (this.compressor) { this.compressor.dispose(); this.compressor = null; }
-    if (this.output) { this.output.dispose(); this.output = null; }
+    this.mute();
+    getTransport().stop();
+    getTransport().cancel(0);
   }
   
   public disposeSampler() {
     if (this.sampler) {
-      try { 
-          this.sampler.releaseAll();
-          this.sampler.disconnect();
-          this.sampler.dispose(); 
-      } catch (e) {}
-      this.sampler = null;
+      this.sampler.releaseAll();
+      this.sampler.volume.value = -100;
     }
   }
 
@@ -125,35 +125,48 @@ class AudioService {
     if (this.sampler) return this.sampler; 
     const bufferMap: Record<string, ToneAudioBuffer> = {};
     this.buffers.forEach((buffer, note) => { bufferMap[note] = buffer; });
-    const sampler = new Sampler({ urls: bufferMap, release: 1, curve: "exponential", volume: -2 });
-    if (this.output) sampler.connect(this.output);
-    else sampler.toDestination();
-    this.sampler = sampler;
-    return sampler;
+    this.sampler = new Sampler({ urls: bufferMap, release: 1, curve: "exponential", volume: -100 });
+    this.ensureEffectChain();
+    return this.sampler;
+  }
+
+  private ensureEffectChain() {
+      if (!this.output) this.output = new Gain(0);
+      if (!this.compressor) this.compressor = new Compressor({ threshold: -20, ratio: 3, attack: 0.05, release: 0.25 });
+      if (!this.reverb) this.reverb = new Reverb({ decay: 3.5, preDelay: 0.01, wet: 0 });
+
+      if (this.sampler) {
+          this.sampler.disconnect();
+          this.sampler.connect(this.output);
+      }
+      this.output.disconnect();
+      this.output.chain(this.compressor, this.reverb, getDestination());
   }
 
   public cancelLoading() {
     this._isAborting = true;
-    this._disposeResources();
-    this.buffers.forEach(b => b.dispose());
-    this.buffers.clear();
+    this.mute();
   }
 
   public async loadSamples(onProgress: (val: number) => void, quality: AudioQuality): Promise<void> {
+    // 1. PHYSICAL LOCK: Mute the entire destination immediately
+    getDestination().mute = true;
+    
+    // 2. LOGICAL KILL: Stop transport, clear events, and silence sampler
+    this.resetPlayback(); 
+    
     await this.ensureContext();
-    this._disposeResources();
+    
+    // 3. RESOURCE RESET
     this.buffers.forEach(b => b.dispose());
     this.buffers.clear();
     this._isAborting = false;
     this.isLoaded = false;
-    this.output = new Gain(0.8);
-    this.compressor = new Compressor({ threshold: -20, ratio: 3, attack: 0.05, release: 0.25 });
-    this.reverb = new Reverb({ decay: 3.5, preDelay: 0.01, wet: 0.35 });
-    this.output.chain(this.compressor, this.reverb, getDestination());
-    await this.reverb.generate().catch(() => {});
 
-    interface LoadTask { note: string; url: string; }
-    const tasks: LoadTask[] = [];
+    if (!this.output) this.output = new Gain(0);
+    this.ensureEffectChain();
+
+    const tasks: { note: string; url: string; }[] = [];
     const baseUrl = "https://tonejs.github.io/audio/salamander/";
     SAMPLED_NOTES.forEach(note => {
         const safeNote = note.replace('#', 's');
@@ -163,10 +176,9 @@ class AudioService {
     const totalFiles = tasks.length;
     let loadedCount = 0;
     for (let i = 0; i < totalFiles; i += 8) {
-        if (this._isAborting) throw new Error("Loading cancelled");
+        if (this._isAborting) break;
         const batch = tasks.slice(i, i + 8);
         await Promise.all(batch.map(async (task) => {
-            if (this._isAborting) return;
             try {
               const blob = await getCachedAudioBlob(task.url);
               const arrayBuffer = await blob.arrayBuffer();
@@ -177,9 +189,19 @@ class AudioService {
             onProgress((loadedCount / totalFiles) * 100);
         }));
     }
-    this.createSampler();
+    
+    if (this.sampler) {
+        // Correctly add each buffer to the existing sampler
+        this.buffers.forEach((buffer, note) => {
+            this.sampler?.add(note as any, buffer);
+        });
+    } else {
+        this.createSampler();
+    }
+    
     this.isLoaded = true;
     onProgress(100);
+    setTimeout(() => { getDestination().mute = false; }, 100);
   }
 
   public async ensureContext() {
@@ -192,7 +214,7 @@ class AudioService {
     if (!this.isLoaded) return;
     if (!this.sampler) this.createSampler();
     this.ensureContext();
-    this.unmute(); // FORCE restorative volume
+    this.unmute();
     this.sampler?.triggerAttack(note, now(), velocity);
   }
 
@@ -214,7 +236,7 @@ class AudioService {
   private rebuildAndSchedule() {
     if (!this.activeCallbacks) return;
     getTransport().stop();
-    getTransport().cancel();
+    getTransport().cancel(0);
     const { onEnd, onClear } = this.activeCallbacks;
     onClear();
     const sampler = this.createSampler();
@@ -251,26 +273,50 @@ class AudioService {
   public mute() {
     if (this.output) {
         this.output.gain.cancelScheduledValues(now());
-        this.output.gain.value = 0;
+        this.output.gain.rampTo(0, 0.01); 
     }
-    if (this.sampler) this.sampler.volume.value = -Infinity;
+    if (this.reverb) {
+        try { this.reverb.wet.rampTo(0, 0.01); } catch (e) {}
+    }
+    if (this.sampler) {
+        this.sampler.volume.cancelScheduledValues(now());
+        this.sampler.volume.value = -100; 
+    }
   }
 
   public unmute() {
     if (this.output) {
         this.output.gain.cancelScheduledValues(now());
-        this.output.gain.value = 0.8;
+        this.output.gain.rampTo(0.8, 0.01); 
     }
-    if (this.sampler) this.sampler.volume.value = -2;
+    if (this.reverb) {
+        try { this.reverb.wet.rampTo(0.35, 0.1); } catch (e) {}
+    }
+    if (this.sampler) {
+        this.sampler.volume.cancelScheduledValues(now());
+        this.sampler.volume.rampTo(-2, 0.01); 
+    }
   }
 
   public resetPlayback() { 
-    this.mute();
+    this.mute(); 
     getTransport().stop(); 
-    getTransport().cancel(); 
+    getTransport().cancel(0); 
     if (this.sampler) {
-        try { this.sampler.releaseAll(); } catch (e) {}
+        try { 
+            // KILL ALL VOICES INSTANTLY
+            const originalRelease = this.sampler.release;
+            this.sampler.release = 0; 
+            this.sampler.releaseAll();
+            this.sampler.release = originalRelease;
+            
+            // LOCK VOLUME
+            this.sampler.volume.cancelScheduledValues(now());
+            this.sampler.volume.value = -100;
+        } catch (e) {}
     }
+    // Hard reset transport state
+    getTransport().seconds = 0;
     this.activeCallbacks = null;
   }
   

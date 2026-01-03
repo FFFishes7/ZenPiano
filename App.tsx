@@ -267,6 +267,7 @@ const App: React.FC = () => {
                 onNoteStop={handleNoteStop}
                 status={status}
                 events={flatEvents}
+                maxDuration={currentSong?.maxDuration || 0}
               />
             </div>
           ) : (
