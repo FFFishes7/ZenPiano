@@ -28,6 +28,7 @@ export interface SongResponse {
   tempo: number; 
   events: MusicalEvent[];
   description: string;
+  maxDuration?: number; // Max duration of a single note event in seconds
 }
 
 /**

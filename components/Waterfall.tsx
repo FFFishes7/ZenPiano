@@ -6,8 +6,9 @@ import { FlatNoteEvent } from '../types';
 
 interface WaterfallProps {
     events: FlatNoteEvent[];
-    activeNotes: Set<string>;
+    activeNotes: Map<string, number>;
     isPlaying: boolean;
+    maxDuration: number;
 }
 
 // Binary search to find the first event index that starts at or after the given time
@@ -26,7 +27,7 @@ const findStartIndex = (events: any[], time: number): number => {
     return low;
 };
 
-export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotes, isPlaying }) => {
+export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotes, isPlaying, maxDuration }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const gridCanvasRef = useRef<HTMLCanvasElement>(null); // Static grid layer
     const containerRef = useRef<HTMLDivElement>(null);
@@ -264,9 +265,8 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 const viewDuration = hitLineY / PIXELS_PER_SECOND;
                 const maxVisibleTime = currentTime + viewDuration + 0.5; // +0.5s buffer for notes entering top
                 
-                // Look back time: Allow for notes that started before currentTime but are long enough to still be visible.
-                // 8 seconds is a generous buffer for very long sustain pedal usage.
-                const minVisibleStartTime = currentTime - 8.0; 
+                // Use calculated maxDuration for look-back to ensure long notes are not culled incorrectly.
+                const minVisibleStartTime = currentTime - (maxDuration + 2.0); 
 
                 // 2. Binary Search to find start index
                 const startIndex = findStartIndex(currentEvents, minVisibleStartTime);
@@ -320,7 +320,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 const x = (globalIndex * COLUMN_WIDTH) - currentScrollLeft;
                 const noteDef = PIANO_KEYS[globalIndex];
                 const isBlack = noteDef.type === 'black';
-                const isActive = currentActiveNotes.has(noteDef.note);
+                const isActive = (currentActiveNotes.get(noteDef.note) || 0) > 0;
 
                 const keyY = hitLineY + 1;
                 const keyH = KEYBOARD_HEIGHT - 1;

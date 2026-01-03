@@ -19,10 +19,11 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('PIANO');
 
   // ==================== Shared Note State ====================
-  const [activeNotes, setActiveNotes] = useState<Set<string>>(new Set());
+  // Note: Using Map for reference counting to support multiple overlapping instances of the same note
+  const [activeNotes, setActiveNotes] = useState<Map<string, number>>(new Map());
 
   const clearAllNotes = useCallback(() => {
-    setActiveNotes(new Set());
+    setActiveNotes(new Map());
   }, []);
 
   // ==================== Use Hooks ====================
@@ -255,6 +256,7 @@ const App: React.FC = () => {
               events={flatEvents}
               activeNotes={activeNotes}
               isPlaying={status === PianoStatus.PLAYING_SONG}
+              maxDuration={currentSong?.maxDuration || 0}
             />
           )}
         </div>

@@ -9,8 +9,8 @@ import { PianoStatus } from '../types';
 
 interface UseNotePlayerOptions {
   status: PianoStatus;
-  activeNotes: Set<string>;
-  setActiveNotes: React.Dispatch<React.SetStateAction<Set<string>>>;
+  activeNotes: Map<string, number>;
+  setActiveNotes: React.Dispatch<React.SetStateAction<Map<string, number>>>;
 }
 
 interface UseNotePlayerReturn {
@@ -36,14 +36,17 @@ export const useNotePlayer = ({
     if (!normalized) return;
     
     setActiveNotes(prev => {
-      if (prev.has(normalized)) return prev; // Avoid unnecessary Set creation
-      const next = new Set(prev);
-      next.add(normalized);
+      const next = new Map(prev);
+      const currentCount = next.get(normalized) || 0;
+      next.set(normalized, currentCount + 1);
       return next;
     });
     
-    audioService.startTone(normalized);
-  }, [status, setActiveNotes]);
+    // Only start tone if it wasn't already playing (count was 0)
+    if ((activeNotes.get(normalized) || 0) === 0) {
+      audioService.startTone(normalized);
+    }
+  }, [status, setActiveNotes, activeNotes]);
 
   const handleNoteStop = useCallback((note: string) => {
     // Forbid user manual operation during song playback
@@ -53,14 +56,21 @@ export const useNotePlayer = ({
     if (!normalized) return;
     
     setActiveNotes(prev => {
-      if (!prev.has(normalized)) return prev; // Avoid unnecessary Set creation
-      const next = new Set(prev);
-      next.delete(normalized);
+      const next = new Map(prev);
+      const currentCount = next.get(normalized) || 0;
+      if (currentCount <= 1) {
+        next.delete(normalized);
+      } else {
+        next.set(normalized, currentCount - 1);
+      }
       return next;
     });
     
-    audioService.stopTone(normalized);
-  }, [status, setActiveNotes]);
+    // Only stop tone if this was the last instance (count becomes 0)
+    if ((activeNotes.get(normalized) || 0) <= 1) {
+      audioService.stopTone(normalized);
+    }
+  }, [status, setActiveNotes, activeNotes]);
 
   return {
     handleNoteStart,

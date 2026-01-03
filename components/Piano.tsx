@@ -25,7 +25,7 @@ function useIsMobile(breakpoint: number = 640): boolean {
 }
 
 interface PianoProps {
-  activeNotes: Set<string>;
+  activeNotes: Map<string, number>;
   onNoteStart: (note: string) => void;
   onNoteStop: (note: string) => void;
   status: PianoStatus;
@@ -386,7 +386,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                         <PianoKey 
                             ref={(el) => registerKey(note.note, el)}
                             noteData={note}
-                            isActive={activeNotes.has(note.note)}
+                            isActive={(activeNotes.get(note.note) || 0) > 0}
                             onPlayStart={handlePlayStart}
                             onPlayStop={handlePlayStop}
                         />
@@ -409,7 +409,7 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                             <PianoKey 
                                 ref={(el) => registerKey(note.note, el)}
                                 noteData={note}
-                                isActive={activeNotes.has(note.note)}
+                                isActive={(activeNotes.get(note.note) || 0) > 0}
                                 onPlayStart={handlePlayStart}
                                 onPlayStop={handlePlayStop}
                             />

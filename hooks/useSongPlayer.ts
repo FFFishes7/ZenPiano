@@ -11,7 +11,7 @@ import { PianoStatus, SongResponse, FlatNoteEvent } from '../types';
 import { MAX_MIDI_FILE_SIZE } from '../constants';
 
 interface UseSongPlayerOptions {
-  setActiveNotes: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setActiveNotes: React.Dispatch<React.SetStateAction<Map<string, number>>>;
   clearAllNotes: () => void;
 }
 
@@ -114,7 +114,12 @@ export const useSongPlayer = ({
         if (currentId !== generationIdRef.current) return;
         const n = normalizeNote(note);
         if (n) {
-          setActiveNotes(prev => prev.has(n) ? prev : new Set(prev).add(n));
+          setActiveNotes(prev => {
+            const next = new Map(prev);
+            const currentCount = next.get(n) || 0;
+            next.set(n, currentCount + 1);
+            return next;
+          });
         }
       },
       // onNoteStop
@@ -123,8 +128,13 @@ export const useSongPlayer = ({
         const n = normalizeNote(note);
         if (n) {
           setActiveNotes(prev => {
-            const next = new Set(prev);
-            next.delete(n);
+            const next = new Map(prev);
+            const currentCount = next.get(n) || 0;
+            if (currentCount <= 1) {
+              next.delete(n);
+            } else {
+              next.set(n, currentCount - 1);
+            }
             return next;
           });
         }
@@ -153,11 +163,13 @@ export const useSongPlayer = ({
     try {
       const midi = new Midi(arrayBuffer);
       const events: FlatNoteEvent[] = [];
+      let maxDuration = 0;
       
       midi.tracks.forEach(track => {
         track.notes.forEach(note => {
           const normalized = normalizeNote(note.name);
           if (normalized) {
+            maxDuration = Math.max(maxDuration, note.duration);
             events.push({
               note: normalized,
               time: note.time,
@@ -180,7 +192,14 @@ export const useSongPlayer = ({
       setTotalDuration(duration);
       setFlatEvents(events);
       setStatus(PianoStatus.READY);
-      setCurrentSong({ songName: name, description: 'Imported MIDI', tempo: 0, events: [] });
+      
+      setCurrentSong({ 
+        songName: name, 
+        description: 'Imported MIDI', 
+        tempo: 0, 
+        events: [],
+        maxDuration: maxDuration // Set calculated max duration
+      });
 
       await audioService.ensureContext();
 
@@ -231,6 +250,11 @@ export const useSongPlayer = ({
       if (currentId !== generationIdRef.current) return;
 
       const flat = getFlatEvents(songData);
+      
+      // Calculate max duration for AI songs
+      const maxDuration = flat.reduce((max, event) => Math.max(max, event.duration), 0);
+      songData.maxDuration = maxDuration;
+
       setFlatEvents(flat);
       
       const duration = flat.reduce((acc, curr) => Math.max(acc, curr.time + curr.duration), 0);
