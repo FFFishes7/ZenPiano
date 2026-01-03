@@ -121,6 +121,9 @@ class AudioService {
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
           this.handlePassiveSuspend();
+        } else {
+          // Anti-pop when coming back: instant mute to clear potential ghost noises
+          if (this.output) this.output.gain.value = 0;
         }
       });
     }
@@ -130,14 +133,19 @@ class AudioService {
    * Internal helper to handle passive suspension (from either statechange or visibilitychange)
    */
   private handlePassiveSuspend() {
-    // 1. Mute and stop time progression
-    this.pause();
-    // 2. Destroy instances (rule: do not trust old instances after resume)
-    this.disposeSampler();
-    // 3. Notify UI to update status to PAUSED
-    if (this.passivePauseHandler) {
-        this.passivePauseHandler();
+    // DO anti-pop (Fade Out) for passive suspend
+    if (this.output) {
+        this.output.gain.rampTo(0, 0.05); 
     }
+
+    setTimeout(() => {
+        getTransport().pause();
+        if (this.sampler) this.sampler.releaseAll();
+        this.disposeSampler();
+        if (this.passivePauseHandler) {
+            this.passivePauseHandler();
+        }
+    }, 50);
   }
 
   /**
@@ -321,11 +329,16 @@ class AudioService {
     // 2. Fresh Instance Layer
     const sampler = this.createSampler();
     
-    // 3. Sync State: Clear existing manual visual states
+    // 3. Instant volume for Playback start (No anti-pop as requested)
+    if (this.output) {
+        this.output.gain.value = 0.8;
+    }
+    
+    // 4. Sync State: Clear existing manual visual states
     const { onEnd, onClear } = this.activeCallbacks;
     onClear();
     
-    // 4. Schedule all notes on the Transport timeline
+    // 5. Schedule all notes on the Transport timeline
     getTransport().bpm.value = 120;
     let maxTime = 0;
 
@@ -341,6 +354,14 @@ class AudioService {
     });
     
     getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 0.5);
+
+    // 6. Trigger Fade-in after transport starts
+    if (this.output) {
+        // Slight delay ensuring audio thread has started
+        setTimeout(() => {
+            if (this.output) this.output.gain.rampTo(0.8, 0.15); // 150ms fade-in
+        }, 10);
+    }
   }
 
   public async play(callbacks?: {
@@ -358,20 +379,27 @@ class AudioService {
         this.rebuildAndSchedule();
     }
     
+    // Ensure instant volume on play
+    if (this.output) this.output.gain.value = 0.8;
+    
     getTransport().start(); 
   }
 
   public pause() { 
     getTransport().pause(); 
-    // Rule: Mute on pause (natural release)
+    // Manual pause: Instant release, no gain ramping
     if (this.sampler) this.sampler.releaseAll();
   }
   
   public resetPlayback() { 
+    // INSTANT mute when entering READY state
+    if (this.output) {
+        this.output.gain.value = 0;
+    }
+
     getTransport().stop(); 
     getTransport().cancel(); 
     this.disposeSampler();
-    // Clear active session callbacks as the session is over
     this.activeCallbacks = null;
   }
   
