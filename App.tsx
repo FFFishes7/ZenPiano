@@ -266,6 +266,7 @@ const App: React.FC = () => {
                 onNoteStart={handleNoteStart}
                 onNoteStop={handleNoteStop}
                 status={status}
+                events={flatEvents}
               />
             </div>
           ) : (

@@ -274,7 +274,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 for (let i = searchIndex; i < currentEvents.length; i++) {
                     const event = currentEvents[i];
                     if (event.time > currentTime) break; // Note hasn't reached hit line yet
-                    if (currentTime >= event.time && currentTime <= event.time + event.duration) {
+                    if (currentTime > event.time && currentTime <= event.time + event.duration) {
                         mathematicallyActiveNotes.add(event.note);
                     }
                 }

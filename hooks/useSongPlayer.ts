@@ -110,28 +110,6 @@ export const useSongPlayer = ({
       const newId = ++generationIdRef.current;
       
       callbacks = {
-        onNoteStart: (note: string) => {
-          if (newId !== generationIdRef.current) return;
-          const n = normalizeNote(note);
-          if (n) {
-            // FAST PATH: Direct ref update
-            const currentCount = activeNotesRef.current.get(n) || 0;
-            activeNotesRef.current.set(n, currentCount + 1);
-          }
-        },
-        onNoteStop: (note: string) => {
-          if (newId !== generationIdRef.current) return;
-          const n = normalizeNote(note);
-          if (n) {
-            // FAST PATH: Direct ref update
-            const currentCount = activeNotesRef.current.get(n) || 0;
-            if (currentCount <= 1) {
-                activeNotesRef.current.delete(n);
-            } else {
-                activeNotesRef.current.set(n, currentCount - 1);
-            }
-          }
-        },
         onEnd: () => {
           if (newId !== generationIdRef.current) return;
           audioService.resetPlayback();
@@ -149,7 +127,7 @@ export const useSongPlayer = ({
     // If undefined (Resume), it uses the active session callbacks.
     audioService.play(callbacks);
     setStatus(PianoStatus.PLAYING_SONG);
-  }, [status, clearAllNotes, activeNotesRef]);
+  }, [status, clearAllNotes]);
 
   /**
    * Process and play MIDI data

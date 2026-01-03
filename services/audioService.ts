@@ -1,4 +1,3 @@
-
 import { 
   Sampler, 
   Reverb, 
@@ -97,8 +96,6 @@ class AudioService {
   
   // ACTIVE SESSION STATE: Callbacks for the currently running (or paused) session
   private activeCallbacks: {
-    onNoteStart: (n: string) => void;
-    onNoteStop: (n: string) => void;
     onEnd: () => void;
     onClear: () => void;
   } | null = null;
@@ -314,91 +311,53 @@ class AudioService {
    * Internal helper to perform the actual reconstruction and scheduling.
    * Called only when Play is triggered from a non-paused state.
    */
-  private async rebuildAndSchedule() {
+  private rebuildAndSchedule() {
     if (!this.activeCallbacks) return;
 
     // 1. Ensure absolute clean slate
     this.disposeSampler();
     getTransport().cancel();
     
-    // 2. Wait for AudioContext clock stability (Crucial for Safari)
-    // After a resume/resync, Safari's currentTime can jump or jitter. 
-    // A slightly longer delay ensures we read a stable 'seconds' value.
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // 3. Fresh Instance Layer
+    // 2. Fresh Instance Layer
     const sampler = this.createSampler();
     
-    // 4. Sync State: Clear existing visual states to prepare for re-sync
-    const { onNoteStart, onNoteStop, onEnd, onClear } = this.activeCallbacks;
+    // 3. Sync State: Clear existing manual visual states
+    const { onEnd, onClear } = this.activeCallbacks;
     onClear();
     
-    // 5. Schedule all notes on the Transport timeline
+    // 4. Schedule all notes on the Transport timeline
     getTransport().bpm.value = 120;
     let maxTime = 0;
-    
-    const currentTransportTime = getTransport().seconds;
-    const EPSILON = 0.01;
-    const RESYNC_THRESHOLD = 0.1; 
-    const isAtStart = currentTransportTime < EPSILON;
 
     this.cachedEvents.forEach(event => {
         const startTime = event.time;
         const endTime = event.time + event.duration;
         if (endTime > maxTime) maxTime = endTime;
         
-        // Audio: Always schedule
+        // Audio: Always schedule.
         getTransport().schedule((time) => {
             sampler.triggerAttackRelease(event.note, event.duration, time, event.velocity);
         }, startTime);
-
-        // Visual Re-sync & Future Scheduling
-        if (startTime < currentTransportTime - EPSILON && endTime > currentTransportTime + RESYNC_THRESHOLD) {
-            // CASE A: Note started in the PAST and is not ending immediately (Resync)
-            // CRITICAL for Safari: Call onNoteStart SYNC-LY here to ensure it happens
-            // before any scheduled stop events.
-            onNoteStart(event.note);
-            getTransport().schedule((time) => {
-                getDraw().schedule(() => onNoteStop(event.note), time);
-            }, endTime);
-        } else if (endTime > currentTransportTime + EPSILON) {
-            // CASE B: Note starts NOW or in the FUTURE
-            getTransport().schedule((time) => {
-                getDraw().schedule(() => onNoteStart(event.note), time);
-            }, startTime);
-            getTransport().schedule((time) => {
-                getDraw().schedule(() => onNoteStop(event.note), time);
-            }, endTime);
-        }
     });
     
     getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 0.5);
   }
 
   public async play(callbacks?: {
-      onNoteStart: (n: string) => void;
-      onNoteStop: (n: string) => void;
       onEnd: () => void;
       onClear: () => void;
   }) { 
     await this.ensureContext();
     
     // If callbacks are provided, this is a FRESH play (not a resume).
-    // Update the active session callbacks.
     if (callbacks) {
         this.activeCallbacks = callbacks;
     }
 
-    // Play Logic:
-    // If sampler is null, it means we are starting from READY/STOP/SUSPEND state.
-    // In this case, we MUST perform a full rebuild and reschedule.
     if (!this.sampler) {
         this.rebuildAndSchedule();
     }
     
-    // Resume Logic:
-    // If sampler already exists, we are just resuming from PAUSE.
-    // Tone.Transport.start() will naturally resume from the current time.
     getTransport().start(); 
   }
 
