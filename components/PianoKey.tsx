@@ -4,35 +4,39 @@ import { NoteDefinition } from '../types';
 
 interface PianoKeyProps {
   noteData: NoteDefinition;
-  isActive: boolean;
   onPlayStart: (note: NoteDefinition) => void;
   onPlayStop: (note: NoteDefinition) => void;
 }
 
-const PianoKey = React.memo(forwardRef<HTMLDivElement, PianoKeyProps>(({ noteData, isActive, onPlayStart, onPlayStop }, ref) => {
+const PianoKey = React.memo(forwardRef<HTMLDivElement, PianoKeyProps>(({ noteData, onPlayStart, onPlayStop }, ref) => {
   const isWhite = noteData.type === 'white';
   
   // Track if this interaction started with touch (to ignore emulated mouse events)
   const isTouchActiveRef = React.useRef(false);
 
+  const activeWhiteClasses = 'bg-slate-300 shadow-inner scale-[0.99] translate-y-1 border-slate-400';
+  const inactiveWhiteClasses = 'bg-white shadow-md hover:shadow-lg hover:bg-slate-50';
+  
+  const activeBlackClasses = 'bg-black shadow-none scale-[0.99] translate-y-0.5 border-slate-900';
+  const inactiveBlackClasses = 'shadow-xl bg-gradient-to-b from-slate-800 to-slate-900';
+
+  // OPTIMIZATION: Always render as INACTIVE initially.
+  // The 'active' state is now managed exclusively by the parent's RAF loop directly manipulating the DOM.
+  // This bypasses React's render cycle latency and prevents state conflicts.
   const whiteClasses = `
     relative h-48 sm:h-64 landscape:h-32 md:landscape:h-64 w-10 sm:w-12 
-    bg-white border border-slate-200 rounded-b-lg z-0 flex-shrink-0
-    transition-all duration-75 ease-out origin-top
-    ${isActive 
-      ? 'bg-slate-300 shadow-inner scale-[0.99] translate-y-1 border-slate-400' 
-      : 'shadow-md hover:shadow-lg hover:bg-slate-50'
-    }
+    border border-slate-200 rounded-b-lg z-0 flex-shrink-0
+    origin-top
+    piano-key
+    ${inactiveWhiteClasses}
   `;
 
   const blackClasses = `
     absolute h-28 sm:h-40 landscape:h-20 md:landscape:h-40 w-6 sm:w-8 
-    bg-slate-900 rounded-b-md z-10 border-x border-b border-slate-800
-    transition-all duration-75 ease-out origin-top
-    ${isActive 
-      ? 'bg-black shadow-none scale-[0.99] translate-y-0.5 border-slate-900' 
-      : 'shadow-xl bg-gradient-to-b from-slate-800 to-slate-900'
-    }
+    rounded-b-md z-10 border-x border-b border-slate-800
+    origin-top
+    piano-key
+    ${inactiveBlackClasses}
   `;
 
   const handleMouseDown = (e: React.MouseEvent) => {

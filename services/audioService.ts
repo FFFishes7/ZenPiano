@@ -328,22 +328,40 @@ class AudioService {
     getTransport().bpm.value = 120;
     let maxTime = 0;
     
+    // Get current time to avoid re-triggering past "Start" events during a rebuild/resume
+    const currentTransportTime = getTransport().seconds;
+    
+    // Epsilon to prevent double-counting notes that started exactly at the pause time (10ms)
+    const EPSILON = 0.01;
+    const isAtStart = currentTransportTime < EPSILON;
+
     this.cachedEvents.forEach(event => {
         const startTime = event.time;
         const endTime = event.time + event.duration;
         if (endTime > maxTime) maxTime = endTime;
         
+        // Audio: Always schedule. Tone.js handles "past" triggers by playing from offset or skipping.
         getTransport().schedule((time) => {
             sampler.triggerAttackRelease(event.note, event.duration, time, event.velocity);
-            getDraw().schedule(() => onNoteStart(event.note), time);
         }, startTime);
+
+        // Visuals: Only schedule if they occur in the FUTURE relative to current playback time.
+        // Special Case: if we are at the very start (0s), we MUST include notes starting at 0s.
+        if (startTime > currentTransportTime + (isAtStart ? -EPSILON : EPSILON)) {
+            getTransport().schedule((time) => {
+                onNoteStart(event.note);
+            }, startTime);
+        }
         
-        getTransport().schedule((time) => {
-            getDraw().schedule(() => onNoteStop(event.note), time);
-        }, endTime);
+        // Similarly, only schedule Stop events for the future.
+        if (endTime > currentTransportTime + EPSILON) {
+            getTransport().schedule((time) => {
+                onNoteStop(event.note);
+            }, endTime);
+        }
     });
     
-    getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 1);
+    getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 0.5);
   }
 
   public async play(callbacks?: {

@@ -11,6 +11,7 @@ import { PianoStatus, SongResponse, FlatNoteEvent } from '../types';
 import { MAX_MIDI_FILE_SIZE } from '../constants';
 
 interface UseSongPlayerOptions {
+  activeNotesRef: React.MutableRefObject<Map<string, number>>;
   setActiveNotes: React.Dispatch<React.SetStateAction<Map<string, number>>>;
   clearAllNotes: () => void;
 }
@@ -63,6 +64,7 @@ const getFlatEvents = (song: SongResponse | null): FlatNoteEvent[] => {
  * - Progress tracking
  */
 export const useSongPlayer = ({
+  activeNotesRef,
   setActiveNotes,
   clearAllNotes,
 }: UseSongPlayerOptions): UseSongPlayerReturn => {
@@ -75,11 +77,22 @@ export const useSongPlayer = ({
   const rafRef = useRef<number>(0);
   const generationIdRef = useRef<number>(0);
 
-  // Cleanup resources
+  // Cleanup and passive suspend handling
   useEffect(() => {
+    // Register listener for passive suspension (e.g. browser backgrounding)
+    audioService.setPassivePauseHandler(() => {
+        setStatus(prev => {
+            if (prev === PianoStatus.PLAYING_SONG) {
+                return PianoStatus.PAUSED;
+            }
+            return prev;
+        });
+    });
+
     return () => {
       audioService.stopSequence();
       cancelAnimationFrame(rafRef.current);
+      audioService.setPassivePauseHandler(() => {}); // Clear on unmount
     };
   }, []);
 
@@ -123,10 +136,15 @@ export const useSongPlayer = ({
           if (newId !== generationIdRef.current) return;
           const n = normalizeNote(note);
           if (n) {
+            // FAST PATH: Direct ref update
+            const currentCount = activeNotesRef.current.get(n) || 0;
+            activeNotesRef.current.set(n, currentCount + 1);
+
+            // SLOW PATH: React state sync
             setActiveNotes(prev => {
               const next = new Map<string, number>(prev);
-              const currentCount = next.get(n) || 0;
-              next.set(n, currentCount + 1);
+              const c = next.get(n) || 0;
+              next.set(n, c + 1);
               return next;
             });
           }
@@ -135,13 +153,22 @@ export const useSongPlayer = ({
           if (newId !== generationIdRef.current) return;
           const n = normalizeNote(note);
           if (n) {
+            // FAST PATH: Direct ref update
+            const currentCount = activeNotesRef.current.get(n) || 0;
+            if (currentCount <= 1) {
+                activeNotesRef.current.delete(n);
+            } else {
+                activeNotesRef.current.set(n, currentCount - 1);
+            }
+
+            // SLOW PATH: React state sync
             setActiveNotes(prev => {
               const next = new Map<string, number>(prev);
-              const currentCount = next.get(n) || 0;
-              if (currentCount <= 1) {
+              const c = next.get(n) || 0;
+              if (c <= 1) {
                 next.delete(n);
               } else {
-                next.set(n, currentCount - 1);
+                next.set(n, c - 1);
               }
               return next;
             });
@@ -160,7 +187,7 @@ export const useSongPlayer = ({
     // If undefined (Resume), it uses the active session callbacks.
     audioService.play(callbacks);
     setStatus(PianoStatus.PLAYING_SONG);
-  }, [status, setActiveNotes, clearAllNotes]);
+  }, [status, setActiveNotes, clearAllNotes, activeNotesRef]);
 
   /**
    * Process and play MIDI data

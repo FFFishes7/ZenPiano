@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import Piano from './components/Piano';
 import Controls from './components/Controls';
 import { Waterfall } from './components/Waterfall';
@@ -19,10 +19,15 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('PIANO');
 
   // ==================== Shared Note State ====================
+  // FAST PATH: Ref for immediate visual updates (bypassing React render cycle)
+  const activeNotesRef = useRef<Map<string, number>>(new Map());
+  
+  // SLOW PATH: React state for compatibility and less critical UI updates
   // Note: Using Map for reference counting to support multiple overlapping instances of the same note
   const [activeNotes, setActiveNotes] = useState<Map<string, number>>(new Map());
 
   const clearAllNotes = useCallback(() => {
+    activeNotesRef.current.clear(); // Clear fast path immediately
     setActiveNotes(new Map());
   }, []);
 
@@ -39,6 +44,7 @@ const App: React.FC = () => {
     handlePause,
     handleStop: songPlayerStop,
   } = useSongPlayer({
+    activeNotesRef, // Pass fast path ref
     setActiveNotes,
     clearAllNotes,
   });
@@ -46,7 +52,7 @@ const App: React.FC = () => {
   // Note Player Hook
   const { handleNoteStart, handleNoteStop } = useNotePlayer({
     status,
-    activeNotes,
+    activeNotesRef, // Pass fast path ref
     setActiveNotes,
   });
 
@@ -242,7 +248,7 @@ const App: React.FC = () => {
           {viewMode === 'PIANO' ? (
             <div className="h-full w-full overflow-hidden flex flex-col justify-center bg-slate-100/50">
               <Piano
-                activeNotes={activeNotes}
+                activeNotesRef={activeNotesRef} // Pass fast path ref
                 onNoteStart={handleNoteStart}
                 onNoteStop={handleNoteStop}
                 status={status}
@@ -251,7 +257,7 @@ const App: React.FC = () => {
           ) : (
             <Waterfall
               events={flatEvents}
-              activeNotes={activeNotes}
+              activeNotesRef={activeNotesRef} // Pass fast path ref
               isPlaying={status === PianoStatus.PLAYING_SONG}
               maxDuration={currentSong?.maxDuration || 0}
             />

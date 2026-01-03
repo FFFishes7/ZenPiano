@@ -9,7 +9,7 @@ import { PianoStatus } from '../types';
 
 interface UseNotePlayerOptions {
   status: PianoStatus;
-  activeNotes: Map<string, number>;
+  activeNotesRef: React.MutableRefObject<Map<string, number>>;
   setActiveNotes: React.Dispatch<React.SetStateAction<Map<string, number>>>;
 }
 
@@ -25,18 +25,15 @@ interface UseNotePlayerReturn {
  */
 export const useNotePlayer = ({
   status,
-  activeNotes,
+  activeNotesRef,
   setActiveNotes,
 }: UseNotePlayerOptions): UseNotePlayerReturn => {
-  // Use a local Ref as the Source of Truth for logic to ensure synchronous updates.
-  // We initialize it with the passed prop to ensure consistency on mount.
-  // Note: We don't sync it back from props in useEffect because this hook 
-  // "owns" the mutation logic. The prop is just for initial state or external resets.
-  const internalActiveNotesRef = useRef<Map<string, number>>(activeNotes);
+  // Source of Truth for logic (Synchronous)
+  const internalActiveNotesRef = useRef<Map<string, number>>(new Map());
 
-  // Sync ref if external activeNotes changes significantly (e.g. clearAllNotes)
-  // This covers cases where parent clears notes (Stop button)
-  if (activeNotes.size === 0 && internalActiveNotesRef.current.size !== 0) {
+  // Handle external clears (e.g. Stop button) by checking the fast path ref
+  // If the fast path is empty but our internal is not, sync it.
+  if (activeNotesRef.current.size === 0 && internalActiveNotesRef.current.size !== 0) {
       internalActiveNotesRef.current = new Map();
   }
 
@@ -58,9 +55,13 @@ export const useNotePlayer = ({
     // Update Source of Truth SYNCHRONOUSLY
     notesMap.set(normalized, currentCount + 1);
     
+    // Update Fast Path Ref Immediately for Visuals
+    const fastCount = activeNotesRef.current.get(normalized) || 0;
+    activeNotesRef.current.set(normalized, fastCount + 1);
+    
     // Trigger UI update (Asynchronous)
     setActiveNotes(new Map(notesMap));
-  }, [status, setActiveNotes]);
+  }, [status, setActiveNotes, activeNotesRef]);
 
   const handleNoteStop = useCallback((note: string) => {
     // Forbid user manual operation during song playback
@@ -80,9 +81,17 @@ export const useNotePlayer = ({
        notesMap.set(normalized, currentCount - 1);
     }
 
+    // Update Fast Path Ref Immediately for Visuals
+    const fastCount = activeNotesRef.current.get(normalized) || 0;
+    if (fastCount <= 1) {
+        activeNotesRef.current.delete(normalized);
+    } else {
+        activeNotesRef.current.set(normalized, fastCount - 1);
+    }
+
     // Trigger UI update (Asynchronous)
     setActiveNotes(new Map(notesMap));
-  }, [status, setActiveNotes]);
+  }, [status, setActiveNotes, activeNotesRef]);
 
   return {
     handleNoteStart,

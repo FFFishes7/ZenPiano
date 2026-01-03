@@ -25,7 +25,7 @@ function useIsMobile(breakpoint: number = 640): boolean {
 }
 
 interface PianoProps {
-  activeNotes: Map<string, number>;
+  activeNotesRef: React.MutableRefObject<Map<string, number>>; // Use fast path ref
   onNoteStart: (note: string) => void;
   onNoteStop: (note: string) => void;
   status: PianoStatus;
@@ -44,10 +44,20 @@ const enum GestureScrollPermission {
   DENY = 'DENY'      // Gesture started on keys, deny scrolling
 }
 
-const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNoteStop, status }) => {
+// Key styling constants for direct DOM manipulation
+const WHITE_ACTIVE_CLASSES = ['bg-slate-300', 'shadow-inner', 'scale-[0.99]', 'translate-y-1', 'border-slate-400'];
+const WHITE_INACTIVE_CLASSES = ['bg-white', 'shadow-md', 'hover:shadow-lg', 'hover:bg-slate-50'];
+
+const BLACK_ACTIVE_CLASSES = ['bg-black', 'shadow-none', 'scale-[0.99]', 'translate-y-0.5', 'border-slate-900'];
+const BLACK_INACTIVE_CLASSES = ['shadow-xl', 'bg-gradient-to-b', 'from-slate-800', 'to-slate-900'];
+
+const Piano: React.FC<PianoProps> = React.memo(({ activeNotesRef, onNoteStart, onNoteStop, status }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Tracks active touches: Map<TouchIdentifier, NoteName>
   const activeTouchesRef = useRef<Map<number, string>>(new Map());
+  
+  // Track previous state to avoid unnecessary DOM writes
+  const prevActiveNotesRef = useRef(new Map<string, number>());
   
   // Responsive mobile detection - computed once and updated on resize
   const isMobile = useIsMobile(640);
@@ -55,18 +65,70 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
   // 1. Ref Map: Stores direct DOM references to keys
   const keysRef = useRef<Map<string, HTMLDivElement>>(new Map());
   
-  // 2. Rect Cache: Stores geometric data calculated on demand
+  // ... (existing Rect Cache and Gesture state refs) ...
   const keyRectsRef = useRef<KeyRect[]>([]);
-  const keyRectsDirtyRef = useRef(true); // Flag indicating if cache needs update
-  
-  // 3. Gesture state: scroll permission determined at touchstart (immutable during gesture)
+  const keyRectsDirtyRef = useRef(true); 
   const gestureScrollPermissionRef = useRef<GestureScrollPermission>(GestureScrollPermission.NONE);
 
-  // 4. Refs for callbacks and status to avoid re-bindng event listeners
+  // ... (existing refs for callbacks) ...
   const statusRef = useRef(status);
   const onNoteStartRef = useRef(onNoteStart);
   const onNoteStopRef = useRef(onNoteStop);
   
+  // Animation Loop for Direct DOM Manipulation
+  useEffect(() => {
+    let animationFrameId: number;
+
+    const renderLoop = () => {
+      const currentNotes = activeNotesRef.current;
+      const prevNotes = prevActiveNotesRef.current;
+      const keys = keysRef.current;
+
+      // Check if visualization needs update
+      // Simple optimization: only update if the Set/Map content effectively changed
+      // But since we need to update potentially 88 keys, and checking diff is O(N),
+      // we can just iterate the keys that CHANGED.
+      // Actually, standard approach: Iterate all keys? No, iterate active notes + prev active notes.
+      
+      const allInvolvedNotes = new Set([...currentNotes.keys(), ...prevNotes.keys()]);
+      
+      allInvolvedNotes.forEach(note => {
+          const el = keys.get(note);
+          if (!el) return;
+
+          const isActive = (currentNotes.get(note) || 0) > 0;
+          const wasActive = (prevNotes.get(note) || 0) > 0;
+
+          if (isActive !== wasActive) {
+              const isBlack = note.includes('#');
+              const activeClasses = isBlack ? BLACK_ACTIVE_CLASSES : WHITE_ACTIVE_CLASSES;
+              const inactiveClasses = isBlack ? BLACK_INACTIVE_CLASSES : WHITE_INACTIVE_CLASSES;
+
+              if (isActive) {
+                  el.classList.remove(...inactiveClasses);
+                  el.classList.add(...activeClasses);
+              } else {
+                  el.classList.remove(...activeClasses);
+                  el.classList.add(...inactiveClasses);
+              }
+          }
+      });
+
+      // Update prev state for next frame
+      if (allInvolvedNotes.size > 0) {
+          prevActiveNotesRef.current = new Map(currentNotes);
+      }
+
+      animationFrameId = requestAnimationFrame(renderLoop);
+    };
+
+    renderLoop();
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []); // Empty dependency array -> run once on mount
+
   // Keep refs in sync with props
   useEffect(() => { statusRef.current = status; }, [status]);
   useEffect(() => { onNoteStartRef.current = onNoteStart; }, [onNoteStart]);
@@ -404,7 +466,6 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                         <PianoKey 
                             ref={(el) => registerKey(note.note, el)}
                             noteData={note}
-                            isActive={(activeNotes.get(note.note) || 0) > 0}
                             onPlayStart={handlePlayStart}
                             onPlayStop={handlePlayStop}
                         />
@@ -427,7 +488,6 @@ const Piano: React.FC<PianoProps> = React.memo(({ activeNotes, onNoteStart, onNo
                             <PianoKey 
                                 ref={(el) => registerKey(note.note, el)}
                                 noteData={note}
-                                isActive={(activeNotes.get(note.note) || 0) > 0}
                                 onPlayStart={handlePlayStart}
                                 onPlayStop={handlePlayStop}
                             />
