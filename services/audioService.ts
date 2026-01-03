@@ -107,14 +107,46 @@ class AudioService {
   private currentQuality: AudioQuality = 'LIGHT';
   private _isAborting = false;
 
+  // Callback to notify UI when audio is passively suspended (e.g. backgrounded)
+  private passivePauseHandler: (() => void) | null = null;
+
   constructor() {
     // Passive Suspend Handling: strictly follow the rule "distrust suspend"
-    // If the context state changes (e.g. browser backgrounding), we clean up the instance layer.
     getContext().on('statechange', (state) => {
       if (state === 'suspended' || state === 'closed') {
-        this.disposeSampler();
+        this.handlePassiveSuspend();
       }
     });
+
+    // Reliable background detection for Safari/Mobile:
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          this.handlePassiveSuspend();
+        }
+      });
+    }
+  }
+
+  /**
+   * Internal helper to handle passive suspension (from either statechange or visibilitychange)
+   */
+  private handlePassiveSuspend() {
+    // 1. Mute and stop time progression
+    this.pause();
+    // 2. Destroy instances (rule: do not trust old instances after resume)
+    this.disposeSampler();
+    // 3. Notify UI to update status to PAUSED
+    if (this.passivePauseHandler) {
+        this.passivePauseHandler();
+    }
+  }
+
+  /**
+   * Register a handler to be called when the system suspends the audio.
+   */
+  public setPassivePauseHandler(handler: () => void) {
+    this.passivePauseHandler = handler;
   }
 
   // Cleanup all disposable resources (Instance Layer)
