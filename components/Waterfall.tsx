@@ -264,6 +264,22 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             const visibleKeysCount = visibleKeysCountRef.current;
             const hitLineY = height - KEYBOARD_HEIGHT;
 
+            // --- CALCULATE MATHEMATICALLY ACTIVE NOTES FROM EVENTS ---
+            // This ensures the bottom keyboard is perfectly synced with the visuals,
+            // bypassing any JS callback jitter.
+            const mathematicallyActiveNotes = new Set<string>();
+            if (currentEvents.length > 0) {
+                // Use a smaller window for look-up to find notes that are CURRENTLY at the hit line
+                const searchIndex = findStartIndex(currentEvents, currentTime - 2.0); // look back up to 2s
+                for (let i = searchIndex; i < currentEvents.length; i++) {
+                    const event = currentEvents[i];
+                    if (event.time > currentTime) break; // Note hasn't reached hit line yet
+                    if (currentTime >= event.time && currentTime <= event.time + event.duration) {
+                        mathematicallyActiveNotes.add(event.note);
+                    }
+                }
+            }
+
             // --- OPTIMIZED NOTE RENDERING ---
             // Skip note rendering if no events
             if (currentEvents.length > 0) {
@@ -328,7 +344,10 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 const x = (globalIndex * COLUMN_WIDTH) - currentScrollLeft;
                 const noteDef = PIANO_KEYS[globalIndex];
                 const isBlack = noteDef.type === 'black';
-                const isActive = (currentActiveNotes.get(noteDef.note) || 0) > 0;
+                
+                // HIGHLIGHT LOGIC: Active if manually played OR mathematically should be playing right now
+                const isActive = (currentActiveNotes.get(noteDef.note) || 0) > 0 || 
+                                 mathematicallyActiveNotes.has(noteDef.note);
 
                 const keyY = hitLineY + 1;
                 const keyH = KEYBOARD_HEIGHT - 1;

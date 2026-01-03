@@ -222,9 +222,8 @@ export const useSongPlayer = ({
       if (currentId !== generationIdRef.current) return;
 
       if (events.length === 0) {
-        alert('No notes found.');
         setStatus(PianoStatus.IDLE);
-        return;
+        throw new Error('No notes found in MIDI file.');
       }
 
       const duration = events.reduce((acc, curr) => Math.max(acc, curr.time + curr.duration), 0);
@@ -246,11 +245,11 @@ export const useSongPlayer = ({
 
       schedulePlayback(events);
       // Auto-play removed per user request. Status stays at READY.
-    } catch (e) {
+    } catch (e: any) {
       if (currentId !== generationIdRef.current) return;
       console.error(e);
-      alert('Failed to parse MIDI');
       setStatus(PianoStatus.IDLE);
+      throw e;
     }
   }, [clearAllNotes, schedulePlayback, handlePlay]);
 
@@ -306,11 +305,11 @@ export const useSongPlayer = ({
 
       schedulePlayback(flat);
       // Auto-play removed per user request. Status stays at READY.
-    } catch (error) {
+    } catch (error: any) {
       if (currentId !== generationIdRef.current) return;
       console.error(error);
-      alert('Failed to generate song.');
       setStatus(PianoStatus.IDLE);
+      throw error;
     }
   }, [clearAllNotes, schedulePlayback, handlePlay]);
 

@@ -349,14 +349,16 @@ class AudioService {
         // Special Case: if we are at the very start (0s), we MUST include notes starting at 0s.
         if (startTime > currentTransportTime + (isAtStart ? -EPSILON : EPSILON)) {
             getTransport().schedule((time) => {
-                onNoteStart(event.note);
+                getDraw().schedule(() => onNoteStart(event.note), time);
             }, startTime);
         }
         
         // Similarly, only schedule Stop events for the future.
-        if (endTime > currentTransportTime + EPSILON) {
+        // CRITICAL: We do NOT use EPSILON here. If a note is ending any time after the current position,
+        // we MUST schedule its stop callback to prevent it from getting stuck in the 'active' state.
+        if (endTime > currentTransportTime) {
             getTransport().schedule((time) => {
-                onNoteStop(event.note);
+                getDraw().schedule(() => onNoteStop(event.note), time);
             }, endTime);
         }
     });

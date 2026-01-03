@@ -17,6 +17,7 @@ const App: React.FC = () => {
   // ==================== UI State ====================
   const [dragActive, setDragActive] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('PIANO');
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   // ==================== Shared Note State ====================
   // FAST PATH: Ref for immediate visual updates (bypassing React render cycle)
@@ -38,8 +39,8 @@ const App: React.FC = () => {
     currentSong,
     flatEvents,
     playbackProgress,
-    handleGenerateAndPlay,
-    handleMidiUpload,
+    handleGenerateAndPlay: rawHandleGenerateAndPlay,
+    handleMidiUpload: rawHandleMidiUpload,
     handlePlay,
     handlePause,
     handleStop: songPlayerStop,
@@ -48,6 +49,24 @@ const App: React.FC = () => {
     setActiveNotes,
     clearAllNotes,
   });
+
+  const handleGenerateAndPlay = useCallback(async (prompt: string) => {
+    setGenerationError(null);
+    try {
+      await rawHandleGenerateAndPlay(prompt);
+    } catch (err: any) {
+      setGenerationError(err.message || 'Generation failed');
+    }
+  }, [rawHandleGenerateAndPlay]);
+
+  const handleMidiUpload = useCallback(async (file: File) => {
+    setGenerationError(null);
+    try {
+      await rawHandleMidiUpload(file);
+    } catch (err: any) {
+      setGenerationError(err.message || 'MIDI upload failed');
+    }
+  }, [rawHandleMidiUpload]);
 
   // Note Player Hook
   const { handleNoteStart, handleNoteStop } = useNotePlayer({
@@ -90,6 +109,7 @@ const App: React.FC = () => {
   // ==================== Stop Playback (Reset View Mode) ====================
   const handleStop = useCallback(() => {
     songPlayerStop();
+    setGenerationError(null);
   }, [songPlayerStop]);
 
   // ==================== Drag and Drop Handling ====================
@@ -283,6 +303,7 @@ const App: React.FC = () => {
             onMidiUpload={handleMidiUpload}
             songName={currentSong?.songName}
             songDescription={currentSong?.description}
+            error={generationError}
           />
         </div>
       </main>

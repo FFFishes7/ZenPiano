@@ -11,6 +11,7 @@ interface ControlsProps {
   onMidiUpload: (file: File) => void;
   songName?: string;
   songDescription?: string;
+  error?: string | null;
 }
 
 const Controls: React.FC<ControlsProps> = React.memo(({ 
@@ -21,7 +22,8 @@ const Controls: React.FC<ControlsProps> = React.memo(({
     onStop, 
     onMidiUpload, 
     songName, 
-    songDescription 
+    songDescription,
+    error
 }) => {
   const [prompt, setPrompt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -153,7 +155,7 @@ const Controls: React.FC<ControlsProps> = React.memo(({
       </div>
       
       <div className="h-6 flex items-center justify-center">
-        {isLoading && (
+        {isLoading ? (
             <div className="flex items-center gap-2">
                 <div className="w-3 h-3 border-2 border-indigo-100 border-t-indigo-500 rounded-full animate-spin"></div>
                 <span className="text-slate-500 text-xs animate-pulse">Composing...</span>
@@ -164,7 +166,22 @@ const Controls: React.FC<ControlsProps> = React.memo(({
                   Cancel
                 </button>
             </div>
-        )}
+        ) : error ? (
+            <div className="flex items-center gap-2 px-3 animate-in fade-in slide-in-from-bottom-1 duration-300">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-rose-500 text-[11px] font-medium truncate max-w-[200px] sm:max-w-xs">{error}</span>
+                <button 
+                  onClick={onStop}
+                  className="ml-1 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+        ) : null}
       </div>
 
     </div>

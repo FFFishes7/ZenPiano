@@ -43,18 +43,19 @@ export const generateSong = async (topic: string): Promise<SongResponse> => {
   // Reuse GoogleGenAI instance
   const ai = getAIInstance();
   
-  // Use gemini-2.5-flash to bypass the environment's 'Launch' gate triggered by Gemini 3 models
-  const model = "gemini-2.5-flash";
+  // Use gemini-3-flash-preview as requested by user
+  const model = "gemini-3-flash-preview";
   
   const prompt = `
-    Compose a complete, musically rich piano piece based on: "${topic}".
+    Compose a complete, professionally structured, and emotionally resonant piano piece based on the theme: "${topic}".
     
-    Guidelines:
-    1. Structure: Include a melody and harmony (chords).
-    2. Range: Use the full piano range (A0 to C8), but focus on C2-C6 for musicality.
-    3. Complexity: Use chords, arpeggios, or intervals. Don't just play single notes.
-    4. Length: The piece should have at least 30-50 musical events (notes/chords) to feel like a full thought.
-    5. Dynamics: Vary the "velocity" and "duration" for each event to create expressive rhythm and emotion.
+    Musical Guidelines:
+    1. Structure: Ensure a clear distinction between a prominent melody (typically right hand, C4-C6) and a supporting accompaniment (typically left hand, C2-C4). 
+    2. Melody: Create a singable, evolving melody line. Use motifs and vary them. Avoid repetitive single notes; use phrasing.
+    3. Accompaniment: Use arpeggios, broken chords, or sophisticated rhythmic patterns rather than just block chords.
+    4. Rhythm & Flow: Use a mix of note durations (e.g., 0.125s, 0.25s, 0.5s, 1s) to create momentum and "breathing" space. Incorporate syncopation where appropriate.
+    5. Length: The piece must be substantial, containing between 60 to 120 musical events to ensure a full musical thought (intro, development, and resolution).
+    6. Dynamics: Use the "velocity" field (0.0 to 1.0) to create crescendos, decrescendos, and to emphasize melodic notes over accompaniment.
   `;
 
   try {
@@ -64,30 +65,48 @@ export const generateSong = async (topic: string): Promise<SongResponse> => {
       config: {
         responseMimeType: "application/json",
         responseSchema: songSchema,
-        systemInstruction: "You are a virtuoso piano composer. Generate expressive JSON music data including velocity for dynamics.",
+        systemInstruction: "You are a world-class piano composer and concert pianist. Your music is known for its beautiful melodies, complex textures, and deep emotional impact. Generate expressive MIDI-like JSON data.",
       },
     });
 
-    // Use .text property directly as per @google/genai guidelines
-    if (response.text) {
-      let cleanText = response.text.trim();
-      
-      // Robust Cleaning: Remove Markdown code blocks if present
-      cleanText = cleanText.replace(/```json/gi, '').replace(/```/g, '');
-
-      // Locate the JSON object bounds (handle preamble/postscript text)
-      const firstBrace = cleanText.indexOf('{');
-      const lastBrace = cleanText.lastIndexOf('}');
-      
-      if (firstBrace !== -1 && lastBrace !== -1) {
-        cleanText = cleanText.substring(firstBrace, lastBrace + 1);
-      }
-
-      return JSON.parse(cleanText) as SongResponse;
+    if (!response.text) {
+      throw new Error("AI returned an empty response. Please try a different prompt.");
     }
-    throw new Error("No response text generated");
-  } catch (error) {
-    console.error("Gemini API or Parsing Error:", error);
-    throw new Error("Failed to compose song. Please try again.");
+
+    let cleanText = response.text.trim();
+    
+    // Robust Cleaning: Remove Markdown code blocks if present
+    cleanText = cleanText.replace(/```json/gi, '').replace(/```/g, '');
+
+    // Locate the JSON object bounds
+    const firstBrace = cleanText.indexOf('{');
+    const lastBrace = cleanText.lastIndexOf('}');
+    
+    if (firstBrace === -1 || lastBrace === -1) {
+      throw new Error("Invalid music data format received.");
+    }
+    
+    cleanText = cleanText.substring(firstBrace, lastBrace + 1);
+
+    try {
+      return JSON.parse(cleanText) as SongResponse;
+    } catch (e) {
+      console.error("JSON Parse Error:", cleanText);
+      throw new Error("Failed to parse the composed music data.");
+    }
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    
+    // Provide more specific error messages if possible
+    const errorMessage = error.message || "";
+    if (errorMessage.includes("API key")) {
+      throw new Error("Invalid API key configuration.");
+    } else if (errorMessage.includes("model not found")) {
+      throw new Error("AI model configuration error.");
+    } else if (errorMessage.includes("quota") || errorMessage.includes("429")) {
+      throw new Error("Rate limit exceeded. Please wait a moment.");
+    }
+    
+    throw new Error(error.message || "Failed to compose song. Please try again.");
   }
 };
