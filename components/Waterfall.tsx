@@ -12,9 +12,18 @@ interface WaterfallProps {
     maxDuration: number;
     initialScrollLeft: number | null;
     onScrollChange: (scrollLeft: number) => void;
+    pixelsPerSecond: number;
 }
 
-export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotesRef, isPlaying, maxDuration, initialScrollLeft, onScrollChange }) => {
+export const Waterfall: React.FC<WaterfallProps> = React.memo(({ 
+    events, 
+    activeNotesRef, 
+    isPlaying, 
+    maxDuration, 
+    initialScrollLeft, 
+    onScrollChange, 
+    pixelsPerSecond 
+}) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const gridCanvasRef = useRef<HTMLCanvasElement>(null); // Static grid layer
     const containerRef = useRef<HTMLDivElement>(null);
@@ -24,7 +33,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
     const KEYBOARD_HEIGHT = 80;
     const TOTAL_KEYS = 88;
     const TOTAL_WIDTH = TOTAL_KEYS * COLUMN_WIDTH;
-    const PIXELS_PER_SECOND = 200; 
+    const PIXELS_PER_SECOND = pixelsPerSecond; 
 
     // PERFORMANCE OPTIMIZATION: Use useRef instead of useState for scroll position
     // to avoid triggering React re-renders on every scroll frame.
@@ -257,6 +266,9 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             // --- CALCULATE MATHEMATICALLY ACTIVE NOTES FROM EVENTS ---
             // Merged into the render loop to avoid double iteration
             const mathematicallyActiveNotes = new Set<string>();
+            
+            // Only show auto-highlights if playing or paused mid-song
+            const shouldShowMathNotes = isPlayingRef.current || (currentTime > 0.05);
 
             // --- OPTIMIZED NOTE RENDERING ---
             // Skip note rendering if no events
@@ -283,7 +295,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                     // --- ACTIVE NOTE CALCULATION (Merged) ---
                     // Check if note is mathematically active right now (FINGER DOWN)
                     // Visual keys should lift when finger lifts, even if pedal sustains sound.
-                    if (currentTime >= event.time && currentTime < event.time + event.duration) {
+                    if (shouldShowMathNotes && currentTime >= event.time && currentTime < event.time + event.duration) {
                         mathematicallyActiveNotes.add(event.note);
                     }
 
@@ -370,7 +382,7 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
              cancelAnimationFrame(rafRef.current);
              renderRef.current = null;
         };
-    }, [TOTAL_WIDTH]); // Remove isPlaying dependency to avoid reinitializing canvas
+    }, [TOTAL_WIDTH, PIXELS_PER_SECOND]); // Remove isPlaying dependency to avoid reinitializing canvas
     
     // Separate effect to control animation start/stop, won't cause canvas reinitialization
     useEffect(() => {

@@ -6,7 +6,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Midi } from '@tonejs/midi';
 import { audioService } from '../services/audioService';
 import { generateSong } from '../services/geminiService';
-import { normalizeNote } from '../utils/noteUtils';
+import { normalizeNote, cleanupVisualOverlaps } from '../utils/noteUtils';
 import { PianoStatus, SongResponse, FlatNoteEvent } from '../types';
 import { MAX_MIDI_FILE_SIZE } from '../constants';
 
@@ -46,7 +46,7 @@ const getFlatEvents = (song: SongResponse | null): FlatNoteEvent[] => {
         flatEvents.push({
           note: normalized,
           time: currentTime,
-          duration: event.duration, // Note sustains for full duration, potentially overlapping next events
+          duration: event.duration, // Note sustains for full duration, allowing polyphony
           velocity: event.velocity ?? 0.7,
         });
       }
@@ -288,8 +288,12 @@ export const useSongPlayer = ({
 
       if (currentId !== generationIdRef.current) return;
 
-      const flat = getFlatEvents(songData);
+      let flat = getFlatEvents(songData);
       
+      // Clean up same-note overlaps for AI generation to ensure physical possibility 
+      // while preserving audio sustain and polyphony across different keys.
+      flat = cleanupVisualOverlaps(flat);
+
       const maxDuration = flat.reduce((max, event) => Math.max(max, event.duration), 0);
       songData.maxDuration = maxDuration;
 

@@ -169,9 +169,48 @@ export const getMathematicallyActiveNotes = (
         if (event.time > currentTime) break; // Future event
         
         // If current time is between start and end of the note
-        if (currentTime > event.time && currentTime <= event.time + event.duration) {
+        // Use >= to ensure notes at exactly 0s can be active, 
+        // but component should guard this with isPlaying check.
+        if (currentTime >= event.time && currentTime < event.time + event.duration) {
             activeNotes.add(event.note);
         }
     }
     return activeNotes;
+};
+
+/**
+ * Clean up visual overlaps for the same note.
+ * If a note starts while the previous one of the same pitch is still being held (visually),
+ * truncate the previous note's DURATION (finger hold) so it ends exactly when the new one starts.
+ * This prevents "impossible same-key" visualization while allowing polyphony across different keys.
+ */
+export const cleanupVisualOverlaps = (events: FlatNoteEvent[]): FlatNoteEvent[] => {
+    const notesByPitch = new Map<string, FlatNoteEvent[]>();
+    
+    events.forEach(event => {
+        if (!notesByPitch.has(event.note)) {
+            notesByPitch.set(event.note, []);
+        }
+        notesByPitch.get(event.note)!.push(event);
+    });
+
+    notesByPitch.forEach(noteList => {
+        // Events are likely already sorted by time from prepareNoteEvents, but let's be safe
+        noteList.sort((a, b) => a.time - b.time);
+
+        for (let i = 0; i < noteList.length - 1; i++) {
+            const current = noteList[i];
+            const next = noteList[i + 1];
+
+            if (current.time + current.duration > next.time) {
+                // Ensure audio is preserved in holdDuration before truncating visual duration
+                if (current.holdDuration === undefined) {
+                    current.holdDuration = current.duration;
+                }
+                current.duration = Math.max(0.01, next.time - current.time);
+            }
+        }
+    });
+
+    return events;
 };
