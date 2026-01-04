@@ -39,6 +39,7 @@ export interface FlatNoteEvent {
   time: number;
   duration: number;
   velocity: number;
+  holdDuration?: number; // Duration including sustain pedal effect
 }
 
 /**

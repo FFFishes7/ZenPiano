@@ -142,9 +142,11 @@ export const useSongPlayer = ({
     try {
       const midi = new Midi(arrayBuffer);
       const events: FlatNoteEvent[] = [];
+      const pedalEvents: { time: number; value: number }[] = [];
       let maxDuration = 0;
       
       midi.tracks.forEach(track => {
+        // Collect notes
         track.notes.forEach(note => {
           const normalized = normalizeNote(note.name);
           if (normalized) {
@@ -157,6 +159,58 @@ export const useSongPlayer = ({
             });
           }
         });
+
+        // Collect sustain pedal events (CC 64)
+        if (track.controlChanges[64]) {
+          track.controlChanges[64].forEach(cc => {
+            pedalEvents.push({ time: cc.time, value: cc.value });
+          });
+        }
+      });
+
+      // Sort pedal events by time
+      pedalEvents.sort((a, b) => a.time - b.time);
+
+      // Calculate holdDuration for each note
+      events.forEach(event => {
+        const noteOffTime = event.time + event.duration;
+        
+        // Check pedal state at note release time
+        let isPedalDown = false;
+        let searchIndex = -1;
+
+        // Find the last pedal event before or at noteOffTime
+        for (let i = 0; i < pedalEvents.length; i++) {
+          if (pedalEvents[i].time <= noteOffTime) {
+            isPedalDown = pedalEvents[i].value >= 64;
+            searchIndex = i;
+          } else {
+            break;
+          }
+        }
+
+        if (isPedalDown) {
+          // Find the next pedal release (value < 64) after this point
+          let releaseTime = noteOffTime;
+          let foundRelease = false;
+          
+          for (let i = searchIndex + 1; i < pedalEvents.length; i++) {
+            if (pedalEvents[i].value < 64) {
+              releaseTime = pedalEvents[i].time;
+              foundRelease = true;
+              break;
+            }
+          }
+
+          // If no release found, extend to a reasonable end (e.g., last pedal event)
+          if (!foundRelease && pedalEvents.length > 0) {
+             releaseTime = Math.max(noteOffTime, pedalEvents[pedalEvents.length - 1].time);
+          }
+          
+          event.holdDuration = releaseTime - event.time;
+        } else {
+          event.holdDuration = event.duration;
+        }
       });
 
       if (currentId !== generationIdRef.current) return;
@@ -166,7 +220,8 @@ export const useSongPlayer = ({
         throw new Error('No notes found in MIDI file.');
       }
 
-      const duration = events.reduce((acc, curr) => Math.max(acc, curr.time + curr.duration), 0);
+      // Calculate total duration based on holdDuration (audible duration)
+      const duration = events.reduce((acc, curr) => Math.max(acc, curr.time + (curr.holdDuration || curr.duration)), 0);
       setTotalDuration(duration);
       setFlatEvents(events);
       setStatus(PianoStatus.READY);

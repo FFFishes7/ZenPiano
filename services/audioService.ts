@@ -68,7 +68,7 @@ class AudioService {
   private reverb: Reverb | null = null;
   private compressor: Compressor | null = null;
   private output: Gain | null = null;
-  private cachedEvents: { note: string; time: number; duration: number; velocity: number }[] = [];
+  private cachedEvents: { note: string; time: number; duration: number; velocity: number; holdDuration?: number }[] = [];
   private activeCallbacks: { onEnd: () => void; onClear: () => void; } | null = null;
   public isLoaded = false;
   private _isSustainPedalDown = false;
@@ -232,7 +232,7 @@ class AudioService {
     if (!isDown && this.sampler) this.sampler.releaseAll();
   }
 
-  public scheduleEvents(events: { note: string; time: number; duration: number; velocity: number }[]) {
+  public scheduleEvents(events: { note: string; time: number; duration: number; velocity: number; holdDuration?: number }[]) {
     this.cachedEvents = events;
     this.resetPlayback();
   }
@@ -249,13 +249,15 @@ class AudioService {
     let maxTime = 0;
     this.cachedEvents.forEach(event => {
         const startTime = event.time;
-        const endTime = event.time + event.duration;
+        // Use holdDuration if available (sustain pedal), otherwise duration
+        const duration = event.holdDuration || event.duration;
+        const endTime = startTime + duration;
         if (endTime > maxTime) maxTime = endTime;
         getTransport().schedule((time) => {
-            sampler.triggerAttackRelease(event.note, event.duration, time, event.velocity);
+            sampler.triggerAttackRelease(event.note, duration, time, event.velocity);
         }, startTime);
     });
-    getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 0.5);
+    getTransport().schedule((time) => getDraw().schedule(() => onEnd(), time), maxTime + 3.0);
   }
 
   public async play(callbacks?: { onEnd: () => void; onClear: () => void; }) { 
