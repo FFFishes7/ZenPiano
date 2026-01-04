@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <link rel="icon" href="data:,">
     <title>Zen Piano</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -17,11 +17,9 @@
       }
       /* Mobile-first dynamic viewport height support */
       .h-screen-safe {
-        height: 100vh;
         height: 100dvh;
       }
       .min-h-screen-safe {
-        min-height: 100vh;
         min-height: 100dvh;
       }
       .fixed-safe {
@@ -30,8 +28,12 @@
         left: 0;
         right: 0;
         bottom: 0;
-        height: 100vh;
         height: 100dvh;
+      }
+      /* CRITICAL: Enforce scrolling only, disabling browser zoom gestures */
+      html, body, #root {
+        touch-action: pan-x pan-y;
+        -webkit-text-size-adjust: 100%;
       }
     </style>
   <script type="importmap">
@@ -45,6 +47,13 @@
     "@tonejs/midi": "https://esm.sh/@tonejs/midi@2.0.28"
   }
 }
+</script>
+<script>
+  // TRIPLE DEFENSE LAYER 3: JS Event Interception
+  // Prevent default browser gestures (pinch-zoom) on iOS
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('gesturechange', (e) => e.preventDefault());
+  document.addEventListener('gestureend', (e) => e.preventDefault());
 </script>
 </head>
   <body class="bg-slate-50 text-slate-900 antialiased overflow-hidden">
