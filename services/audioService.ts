@@ -289,6 +289,7 @@ class AudioService {
   }
 
   public unmute() {
+    getDestination().mute = false;
     if (this.output) {
         this.output.gain.cancelScheduledValues(now());
         this.output.gain.rampTo(0.8, 0.01); 
@@ -303,22 +304,34 @@ class AudioService {
   }
 
   public resetPlayback() { 
-    this.mute(); 
+    // 1. PHYSICAL LOCK: Mute everything to prevent popping during cut-off
+    getDestination().mute = true;
+    
+    // 2. LOGICAL SILENCE: Immediate cut
+    if (this.output) {
+        this.output.gain.cancelScheduledValues(now());
+        this.output.gain.value = 0;
+    }
+
     getTransport().stop(); 
     getTransport().cancel(0); 
+    
+    // 3. VOICE RESET: Reuse sampler but kill voices instantly
     if (this.sampler) {
         try { 
-            // KILL ALL VOICES INSTANTLY
             const originalRelease = this.sampler.release;
             this.sampler.release = 0; 
             this.sampler.releaseAll();
             this.sampler.release = originalRelease;
             
-            // LOCK VOLUME
+            // Ensure volume is reset for next use, but keep it silent for now
             this.sampler.volume.cancelScheduledValues(now());
             this.sampler.volume.value = -100;
-        } catch (e) {}
+        } catch (e) {
+            console.warn("Sampler reset error:", e);
+        }
     }
+
     // Hard reset transport state
     getTransport().seconds = 0;
     this.activeCallbacks = null;
