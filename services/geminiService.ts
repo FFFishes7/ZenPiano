@@ -2,12 +2,32 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SongResponse } from "../types";
 
+const STORAGE_KEY = 'gemini_api_key';
+
 // Singleton pattern: reuse GoogleGenAI instance
 let aiInstance: GoogleGenAI | null = null;
 
+export const setStoredApiKey = (key: string) => {
+  if (key) {
+    localStorage.setItem(STORAGE_KEY, key);
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+  // Reset instance to force re-initialization with new key
+  aiInstance = null;
+};
+
+export const getStoredApiKey = (): string => {
+  return localStorage.getItem(STORAGE_KEY) || '';
+};
+
 const getAIInstance = (): GoogleGenAI => {
   if (!aiInstance) {
-    aiInstance = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const apiKey = getStoredApiKey() || process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error("Missing API Key. Please set your Gemini API Key in the settings.");
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
   }
   return aiInstance;
 };

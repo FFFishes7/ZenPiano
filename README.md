@@ -6,7 +6,7 @@
 
 🌐 **[Live Demo](https://fffishes7.github.io/ZenPiano/)**
 
-> ⚠️ **Note:** AI composition feature requires a Gemini API Key. Please run locally with your own API key to use this feature.
+> 🎹 **AI Feature:** You can now set your own Gemini API Key directly in the web interface by clicking the settings (⚙️) icon next to the "AI Composer" title.
 
 [![React](https://img.shields.io/badge/React-19.x-61DAFB?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript)](https://www.typescriptlang.org/)
@@ -46,6 +46,12 @@
 
 3. **Configure API Key**
    
+   There are two ways to provide an API key for the AI Composition feature:
+
+   **Method 1: Direct UI Input (Recommended)**
+   Click the settings (⚙️) icon next to the "AI Composer" title in the application and paste your API key. It will be stored locally in your browser.
+
+   **Method 2: Environment Variable**
    Set your Gemini API Key in the `.env.local` file:
    ```
    GEMINI_API_KEY=your_api_key_here
