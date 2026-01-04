@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { PIANO_KEYS } from '../constants';
 import { audioService } from '../services/audioService';
 import { FlatNoteEvent } from '../types';
-import { prepareNoteEvents, findStartIndex, getMathematicallyActiveNotes } from '../utils/noteUtils';
+import { prepareNoteEvents, findStartIndex } from '../utils/noteUtils';
 
 interface WaterfallProps {
     events: FlatNoteEvent[];
@@ -255,13 +255,8 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
             const hitLineY = height - KEYBOARD_HEIGHT;
 
             // --- CALCULATE MATHEMATICALLY ACTIVE NOTES FROM EVENTS ---
-            // This ensures the bottom keyboard is perfectly synced with the visuals,
-            // bypassing any JS callback jitter.
-            const mathematicallyActiveNotes = getMathematicallyActiveNotes(
-                currentEvents, 
-                currentTime, 
-                maxDurationRef.current
-            );
+            // Merged into the render loop to avoid double iteration
+            const mathematicallyActiveNotes = new Set<string>();
 
             // --- OPTIMIZED NOTE RENDERING ---
             // Skip note rendering if no events
@@ -284,6 +279,13 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
 
                     // Stop processing if the note starts after the top of the screen
                     if (event.time > maxVisibleTime) break;
+                    
+                    // --- ACTIVE NOTE CALCULATION (Merged) ---
+                    // Check if note is mathematically active right now (FINGER DOWN)
+                    // Visual keys should lift when finger lifts, even if pedal sustains sound.
+                    if (currentTime >= event.time && currentTime < event.time + event.duration) {
+                        mathematicallyActiveNotes.add(event.note);
+                    }
 
                     const keyIndex = (event as any).keyIndex;
                     const noteX = (keyIndex * COLUMN_WIDTH) - currentScrollLeft;
@@ -291,31 +293,33 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                     // Horizontal Culling: Check if note is within horizontal view
                     if (noteX + COLUMN_WIDTH < 0 || noteX > width) continue;
 
-                const timeUntilHit = event.time - currentTime;
-                const distanceToHit = timeUntilHit * PIXELS_PER_SECOND;
-                
-                const noteHeight = event.duration * PIXELS_PER_SECOND;
-                const noteBottomY = hitLineY - distanceToHit;
-                const noteTopY = noteBottomY - noteHeight;
+                    const timeUntilHit = event.time - currentTime;
+                    const distanceToHit = timeUntilHit * PIXELS_PER_SECOND;
+                    
+                    // Visual length uses event.duration (key press), NOT holdDuration (sound)
+                    // The waterfall visualizes FINGERS, not PEDAL.
+                    const noteHeight = event.duration * PIXELS_PER_SECOND;
+                    const noteBottomY = hitLineY - distanceToHit;
+                    const noteTopY = noteBottomY - noteHeight;
 
-                // Vertical Culling: Final safety check (though binary search handles most of this)
-                if (noteTopY > hitLineY || noteBottomY < -50) continue;
+                    // Vertical Culling: Final safety check (though binary search handles most of this)
+                    if (noteTopY > hitLineY || noteBottomY < -50) continue;
 
-                const noteDef = PIANO_KEYS[keyIndex];
-                const isBlack = noteDef.type === 'black';
+                    const noteDef = PIANO_KEYS[keyIndex];
+                    const isBlack = noteDef.type === 'black';
 
-                ctx.fillStyle = isBlack ? '#7c3aed' : '#8b5cf6'; 
-                
-                const padding = 2;
-                ctx.beginPath();
-                ctx.roundRect(
-                    noteX + padding, 
-                    noteTopY, 
-                    COLUMN_WIDTH - (padding * 2), 
-                    noteHeight, 
-                    4
-                );
-                ctx.fill();
+                    ctx.fillStyle = isBlack ? '#7c3aed' : '#8b5cf6'; 
+                    
+                    const padding = 2;
+                    ctx.beginPath();
+                    ctx.roundRect(
+                        noteX + padding, 
+                        noteTopY, 
+                        COLUMN_WIDTH - (padding * 2), 
+                        noteHeight, 
+                        4
+                    );
+                    ctx.fill();
                 }
             }
 
