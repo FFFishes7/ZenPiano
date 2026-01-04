@@ -11,8 +11,8 @@ interface PianoKeyProps {
 const PianoKey = React.memo(forwardRef<HTMLDivElement, PianoKeyProps>(({ noteData, onPlayStart, onPlayStop }, ref) => {
   const isWhite = noteData.type === 'white';
   
-  // Track if this interaction started with touch (to ignore emulated mouse events)
-  const isTouchActiveRef = React.useRef(false);
+  // Use timestamp to ignore emulated mouse events after touch interaction
+  const lastTouchTimeRef = React.useRef(0);
 
   const activeWhiteClasses = 'bg-slate-300 shadow-inner scale-[0.99] translate-y-1 border-slate-400';
   const inactiveWhiteClasses = 'bg-white shadow-md hover:shadow-lg hover:bg-slate-50';
@@ -39,27 +39,31 @@ const PianoKey = React.memo(forwardRef<HTMLDivElement, PianoKeyProps>(({ noteDat
     ${inactiveBlackClasses}
   `;
 
+  const isTouchInteraction = () => {
+    return Date.now() - lastTouchTimeRef.current < 1000;
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
-      // Ignore if this is an emulated event after touch
-      if (isTouchActiveRef.current) return;
+      if (isTouchInteraction()) return;
       onPlayStart(noteData);
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
-      if (isTouchActiveRef.current) return;
+      if (isTouchInteraction()) return;
       onPlayStop(noteData);
   };
   
   const handleMouseLeave = (e: React.MouseEvent) => {
-      if (isTouchActiveRef.current) return;
+      if (isTouchInteraction()) return;
       onPlayStop(noteData);
   };
 
-  // Touch events set the flag to prevent emulated mouse events
   const handleTouchStart = () => {
-      isTouchActiveRef.current = true;
-      // Clear flag after a short delay (mouse events are emulated ~300ms after touch)
-      setTimeout(() => { isTouchActiveRef.current = false; }, 500);
+      lastTouchTimeRef.current = Date.now();
+  };
+
+  const handleTouchEnd = () => {
+      lastTouchTimeRef.current = Date.now();
   };
 
   if (isWhite) {
@@ -71,6 +75,7 @@ const PianoKey = React.memo(forwardRef<HTMLDivElement, PianoKeyProps>(({ noteDat
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
         onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
         data-note={noteData.note} 
       >
         {noteData.note.startsWith('C') && (
@@ -90,6 +95,7 @@ const PianoKey = React.memo(forwardRef<HTMLDivElement, PianoKeyProps>(({ noteDat
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
       onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       data-note={noteData.note}
     >
         <div className="w-full h-full bg-gradient-to-b from-white/10 to-transparent rounded-b-md opacity-50 pointer-events-none"></div>

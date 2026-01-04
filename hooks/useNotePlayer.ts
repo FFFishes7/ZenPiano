@@ -35,6 +35,18 @@ export const useNotePlayer = ({
       internalActiveNotesRef.current = new Map();
   }
 
+  // Safety Sync: If the tab is hidden, audioService forcibly kills voices.
+  // We must sync our internal logic to avoid "ghost" active states.
+  React.useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        internalActiveNotesRef.current.clear();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   const handleNoteStart = useCallback((note: string) => {
     // Forbid user manual play during song playback
     if (status === PianoStatus.PLAYING_SONG) return;
@@ -68,20 +80,24 @@ export const useNotePlayer = ({
     const notesMap = internalActiveNotesRef.current;
     const currentCount = notesMap.get(normalized) || 0;
     
-    // Logic: If count becomes 0 (or less), stop the tone.
-    if (currentCount <= 1) {
-       audioService.stopTone(normalized);
-       notesMap.delete(normalized);
-    } else {
-       notesMap.set(normalized, currentCount - 1);
+    // Logic: Only proceed if we actually have a record of this note playing
+    if (currentCount > 0) {
+      if (currentCount === 1) {
+         audioService.stopTone(normalized);
+         notesMap.delete(normalized);
+      } else {
+         notesMap.set(normalized, currentCount - 1);
+      }
     }
 
     // Update Fast Path Ref Immediately for Visuals
     const fastCount = activeNotesRef.current.get(normalized) || 0;
-    if (fastCount <= 1) {
-        activeNotesRef.current.delete(normalized);
-    } else {
-        activeNotesRef.current.set(normalized, fastCount - 1);
+    if (fastCount > 0) {
+      if (fastCount === 1) {
+          activeNotesRef.current.delete(normalized);
+      } else {
+          activeNotesRef.current.set(normalized, fastCount - 1);
+      }
     }
   }, [status, activeNotesRef]);
 

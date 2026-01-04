@@ -211,7 +211,7 @@ class AudioService {
   }
 
   public startTone(note: string, velocity: number = 0.7) {
-    if (!this.isLoaded) return;
+    if (!note || !this.isLoaded) return;
     if (!this.sampler) this.createSampler();
     this.ensureContext();
     this.unmute();
@@ -219,7 +219,7 @@ class AudioService {
   }
 
   public stopTone(note: string) {
-    if (this._isSustainPedalDown || !this.sampler) return;
+    if (!note || this._isSustainPedalDown || !this.sampler) return;
     this.sampler.triggerRelease(note, now());
   }
 
