@@ -175,9 +175,9 @@ class AudioService {
 
     const totalFiles = tasks.length;
     let loadedCount = 0;
-    for (let i = 0; i < totalFiles; i += 8) {
+    for (let i = 0; i < totalFiles; i += 4) {
         if (this._isAborting) break;
-        const batch = tasks.slice(i, i + 8);
+        const batch = tasks.slice(i, i + 4);
         await Promise.all(batch.map(async (task) => {
             try {
               const blob = await getCachedAudioBlob(task.url);
