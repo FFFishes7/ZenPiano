@@ -12,6 +12,7 @@ const App: React.FC = () => {
   // ==================== Audio Loading State ====================
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [isSamplesLoaded, setIsSamplesLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [audioQuality, setAudioQuality] = useState<AudioQuality | null>(null);
   const [isMounting, setIsMounting] = useState(false);
 
@@ -72,6 +73,7 @@ const App: React.FC = () => {
   // ==================== Audio Loading Logic ====================
   const startLoading = useCallback((quality: AudioQuality) => {
     setAudioQuality(quality);
+    setLoadError(null);
     const load = async () => {
       try {
         await audioService.loadSamples((progress) => {
@@ -83,7 +85,8 @@ const App: React.FC = () => {
       } catch (err: any) {
         console.error('Audio Load Error:', err.message);
         if (err.message !== 'Loading cancelled by user.') {
-          alert(err.message);
+          setLoadError(err.message || 'Failed to load audio resources.');
+        } else {
           setAudioQuality(null);
           setLoadingProgress(0);
         }
@@ -96,6 +99,7 @@ const App: React.FC = () => {
     audioService.cancelLoading();
     setAudioQuality(null);
     setLoadingProgress(0);
+    setLoadError(null);
     setIsMounting(true);
     setTimeout(() => setIsMounting(false), 300);
   }, []);
@@ -164,23 +168,48 @@ const App: React.FC = () => {
       <div className="fixed-safe bg-white flex flex-col items-center justify-center z-50">
         <div className="w-64 space-y-6">
           <h1 className="text-2xl font-light text-center tracking-widest text-slate-800 uppercase">
-            Tuning
+            {loadError ? 'Error' : 'Tuning'}
           </h1>
-          <div className="w-full bg-slate-100 h-0.5 overflow-hidden">
-            <div
-              className="bg-slate-800 h-full transition-all duration-300"
-              style={{ width: `${loadingProgress}%` }}
-            />
-          </div>
-          <div className="flex flex-col items-center gap-4">
-            <p className="text-center text-xs text-slate-400 font-mono">Loading assets...</p>
-            <button
-              onClick={handleCancelLoading}
-              className="px-4 py-1.5 border border-rose-100 text-[10px] font-bold text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-full uppercase tracking-widest hover:transition-colors duration-200"
-            >
-              Cancel
-            </button>
-          </div>
+          
+          {loadError ? (
+            <div className="flex flex-col items-center gap-6">
+              <p className="text-center text-xs text-rose-500 font-mono px-2 leading-relaxed">
+                {loadError}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => audioQuality && startLoading(audioQuality)}
+                  className="px-6 py-2 bg-slate-800 text-white text-[10px] font-bold rounded-full uppercase tracking-widest hover:bg-slate-700 transition-colors duration-200 shadow-sm"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={handleCancelLoading}
+                  className="px-6 py-2 border border-slate-200 text-[10px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-full uppercase tracking-widest transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="w-full bg-slate-100 h-0.5 overflow-hidden">
+                <div
+                  className="bg-slate-800 h-full transition-all duration-300"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+              <div className="flex flex-col items-center gap-4">
+                <p className="text-center text-xs text-slate-400 font-mono">Loading assets...</p>
+                <button
+                  onClick={handleCancelLoading}
+                  className="px-4 py-1.5 border border-rose-100 text-[10px] font-bold text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-full uppercase tracking-widest hover:transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

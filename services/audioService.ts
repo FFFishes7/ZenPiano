@@ -14,7 +14,7 @@ import {
 import { AudioQuality } from '../types';
 
 // --- CONFIGURATION ---
-const FILE_EXT_LIGHT = "mp3"; 
+const FILE_EXT_LIGHT = "ogg"; 
 
 const SAMPLED_NOTES = [
   "A0", "C1", "D#1", "F#1", "A1", 
@@ -43,7 +43,7 @@ async function fetchWithRetry(url: string, signal: AbortSignal, retries = 3): Pr
 }
 
 async function getCachedAudioBlob(fullUrl: string): Promise<Blob> {
-  const cacheName = 'zen-piano-salamander-light';
+  const cacheName = 'zen-piano-salamander-light-v2-ogg';
   try {
     const cache = await caches.open(cacheName);
     const cachedResponse = await cache.match(fullUrl);
@@ -184,7 +184,11 @@ class AudioService {
               const arrayBuffer = await blob.arrayBuffer();
               const audioBuffer = await getContext().decodeAudioData(arrayBuffer);
               this.buffers.set(task.note, new ToneAudioBuffer(audioBuffer));
-            } catch (err) {}
+            } catch (err: any) {
+               // Propagate error to stop the loading process
+               if (this._isAborting) return; // Ignore if we are already cancelling
+               throw err;
+            }
             loadedCount++;
             onProgress((loadedCount / totalFiles) * 100);
         }));
