@@ -16,7 +16,8 @@ export interface NoteDefinition {
  */
 export interface MusicalEvent {
   keys: string[]; // Array of notes for chords (e.g., ["C4", "E4", "G4"])
-  duration: number; // in seconds
+  duration: number; // in seconds (Note sustain time)
+  timeDelta?: number; // in seconds (Time until next event). Optional for backward compatibility.
   velocity?: number; // Optional velocity (0.0 to 1.0) for dynamics
 }
 

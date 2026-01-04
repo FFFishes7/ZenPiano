@@ -27,12 +27,13 @@ const songSchema = {
           keys: { 
             type: Type.ARRAY, 
             items: { type: Type.STRING },
-            description: "Array of note names to play simultaneously (e.g., ['C4', 'E4', 'G4'] for a C major chord)." 
+            description: "Array of note names to play simultaneously (e.g., ['C4', 'E4', 'G4'])." 
           },
-          duration: { type: Type.NUMBER, description: "Duration in seconds until the next event" },
-          velocity: { type: Type.NUMBER, description: "The volume/intensity of the notes from 0.0 (silent) to 1.0 (very loud). Use this for musical expression." },
+          duration: { type: Type.NUMBER, description: "The actual sustain time of these notes in seconds. If duration > timeDelta, notes will overlap with the next event (creating legato/polyphony)." },
+          timeDelta: { type: Type.NUMBER, description: "Time in seconds to wait before the NEXT event starts. Set this smaller than 'duration' to create overlapping notes." },
+          velocity: { type: Type.NUMBER, description: "Volume (0.0-1.0)." },
         },
-        required: ["keys", "duration", "velocity"],
+        required: ["keys", "duration", "velocity", "timeDelta"],
       },
     },
   },
@@ -50,12 +51,16 @@ export const generateSong = async (topic: string): Promise<SongResponse> => {
     Compose a complete, professionally structured, and emotionally resonant piano piece based on the theme: "${topic}".
     
     Musical Guidelines:
-    1. Structure: Ensure a clear distinction between a prominent melody (typically right hand, C4-C6) and a supporting accompaniment (typically left hand, C2-C4). 
-    2. Melody: Create a singable, evolving melody line. Use motifs and vary them. Avoid repetitive single notes; use phrasing.
-    3. Accompaniment: Use arpeggios, broken chords, or sophisticated rhythmic patterns rather than just block chords.
-    4. Rhythm & Flow: Use a mix of note durations (e.g., 0.125s, 0.25s, 0.5s, 1s) to create momentum and "breathing" space. Incorporate syncopation where appropriate.
-    5. Length: The piece must be substantial, containing between 60 to 120 musical events to ensure a full musical thought (intro, development, and resolution).
-    6. Dynamics: Use the "velocity" field (0.0 to 1.0) to create crescendos, decrescendos, and to emphasize melodic notes over accompaniment.
+    1. **Tempo & Mood**: Choose a BPM that perfectly fits the emotional theme (e.g., 60-80 for melancholic, 110-140 for energetic).
+    2. **Structure**: Create a clear musical narrative (Intro -> Theme -> Development -> Climax -> Outro).
+    3. **Polyphony & Texture**: 
+       - Use the 'timeDelta' and 'duration' fields to create rich textures.
+       - **Legato/Sustain**: Make 'duration' > 'timeDelta' to let notes ring out while new ones begin. This is CRITICAL for a real piano sound.
+       - **Counterpoint**: Have a long bass note (e.g., duration 2.0s) while the right hand plays faster melody notes (timeDelta 0.25s) over it.
+    4. **Melody**: Create a singable, evolving melody line. Use motifs and vary them.
+    5. **Accompaniment**: Use arpeggios, broken chords, or sophisticated rhythmic patterns.
+    6. **Length**: 60-120 events. Ensure the piece feels complete.
+    7. **Dynamics**: Use 'velocity' to create phrasing (crescendos/decrescendos).
   `;
 
   try {

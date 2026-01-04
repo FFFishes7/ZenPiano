@@ -37,18 +37,21 @@ const getFlatEvents = (song: SongResponse | null): FlatNoteEvent[] => {
   const flatEvents: FlatNoteEvent[] = [];
   
   song.events.forEach(event => {
+    // If timeDelta is defined, use it for step. Otherwise fallback to duration (backward compatibility)
+    const step = event.timeDelta !== undefined ? event.timeDelta : event.duration;
+
     event.keys.forEach(key => {
       const normalized = normalizeNote(key);
       if (normalized) {
         flatEvents.push({
           note: normalized,
           time: currentTime,
-          duration: event.duration,
+          duration: event.duration, // Note sustains for full duration, potentially overlapping next events
           velocity: event.velocity ?? 0.7,
         });
       }
     });
-    currentTime += event.duration;
+    currentTime += step;
   });
   
   return flatEvents;
@@ -226,10 +229,13 @@ export const useSongPlayer = ({
       setFlatEvents(events);
       setStatus(PianoStatus.READY);
       
+      // Extract BPM from MIDI header, default to 120
+      const initialBpm = midi.header.tempos.length > 0 ? midi.header.tempos[0].bpm : 120;
+
       setCurrentSong({ 
         songName: name, 
         description: 'Imported MIDI', 
-        tempo: 0, 
+        tempo: initialBpm, 
         events: [],
         maxDuration: maxDuration 
       });
