@@ -10,9 +10,11 @@ interface WaterfallProps {
     activeNotesRef: React.MutableRefObject<Map<string, number>>; // Fast path ref
     isPlaying: boolean;
     maxDuration: number;
+    initialScrollLeft: number | null;
+    onScrollChange: (scrollLeft: number) => void;
 }
 
-export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotesRef, isPlaying, maxDuration }) => {
+export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeNotesRef, isPlaying, maxDuration, initialScrollLeft, onScrollChange }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const gridCanvasRef = useRef<HTMLCanvasElement>(null); // Static grid layer
     const containerRef = useRef<HTMLDivElement>(null);
@@ -26,10 +28,15 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
 
     // PERFORMANCE OPTIMIZATION: Use useRef instead of useState for scroll position
     // to avoid triggering React re-renders on every scroll frame.
-    // Initial value -1 means uninitialized, will be calculated based on container width on first render
-    const scrollLeftRef = useRef(-1);
+    // Initial value from props, or -1 if never set
+    const scrollLeftRef = useRef(initialScrollLeft !== null ? initialScrollLeft : -1);
     const lastScrollLeftRef = useRef(-1); // Used to detect scroll changes
     
+    // Notify parent of scroll changes (debounced-ish via the natural scroll events)
+    const reportScrollChange = useCallback((value: number) => {
+        onScrollChange(value);
+    }, [onScrollChange]);
+
     // Cached visible keys count - only updated on resize
     const visibleKeysCountRef = useRef(0);
     
@@ -63,13 +70,15 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
         const maxScroll = Math.max(0, TOTAL_WIDTH - containerWidth);
         
         // Update ref directly without triggering re-render
-        scrollLeftRef.current = Math.min(Math.max(0, scrollLeftRef.current + delta), maxScroll);
+        const nextScroll = Math.min(Math.max(0, scrollLeftRef.current + delta), maxScroll);
+        scrollLeftRef.current = nextScroll;
+        reportScrollChange(nextScroll);
         
         // In paused state, manual rendering is required when scrolling
         if (!isPlayingRef.current && renderRef.current) {
             renderRef.current();
         }
-    }, [TOTAL_WIDTH]);
+    }, [TOTAL_WIDTH, reportScrollChange]);
 
     const handleStart = useCallback((clientX: number) => {
         isDraggingRef.current = true;
@@ -86,12 +95,13 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
         // Update ref directly without triggering re-render
         const nextScroll = Math.min(Math.max(0, initialScrollRef.current - deltaX), maxScroll);
         scrollLeftRef.current = nextScroll;
+        reportScrollChange(nextScroll);
         
         // In paused state, manual rendering is required when dragging
         if (!isPlayingRef.current && renderRef.current) {
             renderRef.current();
         }
-    }, [TOTAL_WIDTH]);
+    }, [TOTAL_WIDTH, reportScrollChange]);
 
     const handleEnd = useCallback(() => {
         isDraggingRef.current = false;
@@ -191,7 +201,9 @@ export const Waterfall: React.FC<WaterfallProps> = React.memo(({ events, activeN
                 // C4 is at key index 39 (counting from A0), center it in view
                 const c4Index = 39;
                 const centerPosition = (c4Index * COLUMN_WIDTH) - (rect.width / 2) + (COLUMN_WIDTH / 2);
-                scrollLeftRef.current = Math.min(Math.max(0, centerPosition), maxScroll);
+                const initialPos = Math.min(Math.max(0, centerPosition), maxScroll);
+                scrollLeftRef.current = initialPos;
+                reportScrollChange(initialPos);
             } else {
                 // On resize, ensure scroll position stays within bounds
                 scrollLeftRef.current = Math.min(scrollLeftRef.current, maxScroll);

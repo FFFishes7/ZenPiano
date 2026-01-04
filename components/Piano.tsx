@@ -28,6 +28,8 @@ interface PianoProps {
   status: PianoStatus;
   events: FlatNoteEvent[];
   maxDuration: number;
+  initialScrollLeft: number | null;
+  onScrollChange: (scrollLeft: number) => void;
 }
 
 interface KeyRect {
@@ -54,7 +56,9 @@ const Piano: React.FC<PianoProps> = React.memo(({
     onNoteStop, 
     status, 
     events,
-    maxDuration 
+    maxDuration,
+    initialScrollLeft,
+    onScrollChange
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const activeTouchesRef = useRef<Map<number, string>>(new Map());
@@ -155,14 +159,19 @@ const Piano: React.FC<PianoProps> = React.memo(({
   useEffect(() => {
     const container = scrollContainerRef.current;
     const handleResize = () => invalidateKeyRects();
-    const handleScroll = () => invalidateKeyRects();
+    const handleScroll = () => {
+      invalidateKeyRects();
+      if (container) {
+        onScrollChange(container.scrollLeft);
+      }
+    };
     window.addEventListener('resize', handleResize);
     container?.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       window.removeEventListener('resize', handleResize);
       container?.removeEventListener('scroll', handleScroll);
     };
-  }, [invalidateKeyRects]);
+  }, [invalidateKeyRects, onScrollChange]);
 
   const keyBindingMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -196,8 +205,13 @@ const Piano: React.FC<PianoProps> = React.memo(({
 
   useEffect(() => {
     if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollLeft = 1000;
+        if (initialScrollLeft !== null) {
+            scrollContainerRef.current.scrollLeft = initialScrollLeft;
+        } else {
+            scrollContainerRef.current.scrollLeft = 1000;
+        }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handlePlayStart = useCallback((noteData: NoteDefinition) => {

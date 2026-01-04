@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Piano from './components/Piano';
 import Controls from './components/Controls';
 import { Waterfall } from './components/Waterfall';
@@ -20,6 +20,19 @@ const App: React.FC = () => {
   const [dragActive, setDragActive] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('PIANO');
   const [generationError, setGenerationError] = useState<string | null>(null);
+
+  // Performance Optimization: Use refs for scroll positions to avoid re-renders on scroll.
+  // We only need to read these values when switching views (mounting/unmounting).
+  const pianoScrollRef = useRef<number | null>(null);
+  const waterfallScrollRef = useRef<number | null>(null);
+
+  const handlePianoScroll = useCallback((value: number) => {
+    pianoScrollRef.current = value;
+  }, []);
+
+  const handleWaterfallScroll = useCallback((value: number) => {
+    waterfallScrollRef.current = value;
+  }, []);
 
   // ==================== Shared Note State ====================
   // FAST PATH: Ref for immediate visual updates (bypassing React render cycle)
@@ -297,6 +310,8 @@ const App: React.FC = () => {
                 status={status}
                 events={flatEvents}
                 maxDuration={currentSong?.maxDuration || 0}
+                initialScrollLeft={pianoScrollRef.current}
+                onScrollChange={handlePianoScroll}
               />
             </div>
           ) : (
@@ -305,6 +320,8 @@ const App: React.FC = () => {
               activeNotesRef={activeNotesRef} // Pass fast path ref
               isPlaying={status === PianoStatus.PLAYING_SONG}
               maxDuration={currentSong?.maxDuration || 0}
+              initialScrollLeft={waterfallScrollRef.current}
+              onScrollChange={handleWaterfallScroll}
             />
           )}
         </div>
