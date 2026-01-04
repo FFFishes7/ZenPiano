@@ -20,7 +20,7 @@ export const PlaybackProgressBar: React.FC<PlaybackProgressBarProps> = React.mem
   useEffect(() => {
     // Only run the loop if playing or paused with valid duration
     if ((status !== PianoStatus.PLAYING_SONG && status !== PianoStatus.PAUSED) || totalDuration <= 0) {
-      if (barRef.current && status === PianoStatus.IDLE) {
+      if (barRef.current && (status === PianoStatus.IDLE || status === PianoStatus.READY)) {
           barRef.current.style.width = '0%';
       }
       return;
