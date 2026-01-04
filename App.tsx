@@ -322,6 +322,14 @@ const App: React.FC = () => {
               maxDuration={currentSong?.maxDuration || 0}
               initialScrollLeft={waterfallScrollRef.current}
               onScrollChange={handleWaterfallScroll}
+              pixelsPerSecond={(() => {
+                  const baseBpm = 120;
+                  const baseSpeed = 200;
+                  const currentBpm = currentSong?.tempo || baseBpm;
+                  const rawSpeed = (currentBpm / baseBpm) * baseSpeed;
+                  // Clamp between 80 and 400 to ensure usability
+                  return Math.min(Math.max(rawSpeed, 80), 400);
+              })()}
             />
           )}
         </div>

@@ -58,9 +58,18 @@ export const generateSong = async (topic: string): Promise<SongResponse> => {
        - **Legato/Sustain**: Make 'duration' > 'timeDelta' to let notes ring out while new ones begin. This is CRITICAL for a real piano sound.
        - **Counterpoint**: Have a long bass note (e.g., duration 2.0s) while the right hand plays faster melody notes (timeDelta 0.25s) over it.
     4. **Melody**: Create a singable, evolving melody line. Use motifs and vary them.
-    5. **Accompaniment**: Use arpeggios, broken chords, or sophisticated rhythmic patterns.
-    6. **Length**: 60-120 events. Ensure the piece feels complete.
-    7. **Dynamics**: Use 'velocity' to create phrasing (crescendos/decrescendos).
+    5. Accompaniment: Use arpeggios, broken chords, or sophisticated rhythmic patterns.
+    6. **Length & Planning**: Target duration is **60-90 seconds**. Plan your event count based on your chosen BPM:
+       - **Slow (60-80 BPM)**: Generate ~60-80 events.
+       - **Medium (90-110 BPM)**: Generate ~100-140 events.
+       - **Fast (120+ BPM)**: Generate ~160-220 events.
+       Ensure the piece has a logical conclusion within these limits.
+    7. **Playability (CRITICAL)**:
+       - This is for a SINGLE human pianist (2 hands, 10 fingers).
+       - **Max Simultaneous Keys**: Do not press more than 4-5 keys per hand at once.
+       - **Hand Span**: Ensure intervals within one hand fit within a 10th (approx. 1.3 octaves).
+       - **No Impossible Overlaps**: Do not trigger a note that is already being held by the same hand unless re-striking it.
+    8. Dynamics: Use 'velocity' to create phrasing (crescendos/decrescendos).
   `;
 
   try {
