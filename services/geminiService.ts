@@ -92,18 +92,56 @@ export const generateSong = async (topic: string): Promise<SongResponse> => {
     8. Dynamics: Use 'velocity' to create phrasing (crescendos/decrescendos).
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: songSchema,
-        systemInstruction: "You are a world-class piano composer and concert pianist. Your music is known for its beautiful melodies, complex textures, and deep emotional impact. Generate expressive MIDI-like JSON data.",
-      },
-    });
+  // Helper to wait
+  const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+  let delay = 2000; // Start with 2 seconds
 
-    if (!response.text) {
+  try {
+    let response;
+    
+    while (attempt <= MAX_RETRIES) {
+      try {
+        response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: songSchema,
+            systemInstruction: "You are a world-class piano composer and concert pianist. Your music is known for its beautiful melodies, complex textures, and deep emotional impact. Generate expressive MIDI-like JSON data.",
+          },
+        });
+        // If successful, break the retry loop
+        break; 
+        
+      } catch (callError: any) {
+        // Analyze if error is retryable (Transient: 429, 503, or quota/overloaded messages)
+        const errMsg = (callError.message || "").toLowerCase();
+        const status = callError.status || callError.response?.status;
+        
+        const isTransient = 
+          status === 429 || 
+          status === 503 || 
+          errMsg.includes("429") || 
+          errMsg.includes("quota") || 
+          errMsg.includes("overloaded") ||
+          errMsg.includes("503");
+
+        if (isTransient && attempt < MAX_RETRIES) {
+          console.warn(`Gemini API 429/503 encountered. Retrying in ${delay}ms... (Attempt ${attempt + 1}/${MAX_RETRIES})`);
+          await wait(delay);
+          delay *= 2; // Exponential backoff
+          attempt++;
+        } else {
+          // Fatal error or max retries reached -> throw to outer catch
+          throw callError;
+        }
+      }
+    }
+
+    if (!response || !response.text) {
       throw new Error("AI returned an empty response. Please try a different prompt.");
     }
 
